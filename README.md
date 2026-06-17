@@ -1,71 +1,72 @@
-# mic-video-toggle
+# dotfiles
 
-Keychron マウスのボタン1つで「**YouTube動画の一時停止／再開 ＋ Codexマイクのトグル ＋ Claudeターミナルのフォーカス**」をまとめて行う仕組み。
+AI 作業（Claude Code / Codex）まわりの macOS 設定ファイル集。
+ターミナル（Ghostty + tmux）と、Keychron マウスから AI 端末を操作する Hammerspoon ホットキーをまとめている。
 
-作成日: 2026-06-16 / 環境: macOS (Darwin 25.x, Apple Silicon)
-
----
-
-## やりたかったこと
-
-動画（Chrome の YouTube）を見ながら作業していて、マイク（Codex、右Commandでトグル）を使うたびに毎回手動で動画を止めるのが面倒だった。それを **1ボタンで自動化**する。
-
-ボタン（= `F18`）を押したときの挙動:
-
-| 操作 | 動画が再生中だった | 動画が止まっていた／無い |
-|---|---|---|
-| **マイクON**（奇数回目の押下） | 動画を一時停止 → Claude端末を前面に → マイクON | 動画はそのまま → Claude端末を前面に → マイクON |
-| **マイクOFF**（偶数回目の押下） | マイクOFF → （自分が止めた動画だけ）再生再開 | マイクOFF → 動画はそのまま |
-
-ポイント:
-- **再生中の動画だけ止める**（toggleではなく `video.pause()` を直接呼ぶので、止まっている動画を誤って再生開始しない）。
-- **自分が止めた動画だけ再生を戻す**（止めた動画に `window.__pausedByMic` フラグを付け、OFF時はそのフラグ付きだけ `play()`）。
-- **マイクをOFFにしてから動画の音を戻す**（マイクが生きてるうちに動画音を拾わないよう、OFFは「マイクOFF → 0.15秒 → 再生再開」の順）。
-- **2つ開いているターミナル.appのうち、`claude` プロセスが動いているタブだけ**を前面＆入力状態にする。
+環境: macOS (Apple Silicon)
 
 ---
 
-## 構成（3パーツ）
+## 構成
 
-### 1. Keychron Launcher（マウス側）
-- 対象ボタンに **`KC_F18`** を割り当てる（KEYMAP → ボタン選択 → `ANY` → `KC_F18` を入力 → 保存）。
-- `F18` は普段使わない安全な空きキーなので採用。マウスは「ただのトリガー」で、条件分岐の処理は全部 Hammerspoon 側が担当する。
+```
+dotfiles/
+├── hammerspoon/
+│   ├── init.lua        # Keychron マウス → AI 端末制御（F18: マイク/動画トグル, F17: Enter送信）
+│   └── README.md       # ↑ の詳細ドキュメント
+├── tmux/
+│   └── tmux.conf       # prefix=Ctrl+a, 方向分割, Shift+矢印移動, 使用率ステータスバー 等
+├── ghostty/
+│   └── config          # テーマ/フォント, Option=Alt, 起動時に tmux "ai" へ自動 attach 等
+└── install.sh          # 各設定を実体→ライブ位置へシンボリックリンク
+```
 
-### 2. Hammerspoon（Mac側のロジック）
-- 設定ファイル: `~/.hammerspoon/init.lua`（本フォルダの `init.lua` がそのバックアップ）。
-- `F18` を待ち受けて、動画制御・マイク送出・端末フォーカスを実行する。
-- 反映: Hammerspoon メニュー（🔨）→ **Reload Config**。
-
-### 3. Chrome（再生状態の読み取り許可）
-- メニューバー **表示 → デベロッパー → 「Apple Events からの JavaScript を許可」** に ✓ を入れる。
-  - ※ Chrome を最前面にしないとこのメニューは出ない。設定画面内の「サイトのJavaScript許可」とは**別物**なので注意。
-- これが無いと AppleScript から動画の再生状態を読めず、**動画制御だけが効かない**（マイクのトグルは動く）。
-
----
-
-## 必要な権限（macOS）
-
-システム設定 → プライバシーとセキュリティ:
-- **アクセシビリティ**: Hammerspoon を許可（合成キー `右Command` の送出に必要）
-- **オートメーション**: Hammerspoon → **Google Chrome** / **Terminal** を許可（初回ボタン押下時にダイアログが出る）
+各設定は **このリポジトリが実体**で、ライブの場所（`~/.tmux.conf` など）は**シンボリックリンク**にしている。
+→ 編集はこのリポジトリ側だけで完結し、Git で履歴管理できる。
 
 ---
 
-## キー仕様メモ
-- 右Command の keycode = **54**（`hs.eventtap.event.newKeyEvent(54, ...)`）。
-- ディレイ = `hs.timer.usleep(150000)` = **0.15秒**（ON/OFF とも同じ）。数値を変えれば調整可。
-- Claude端末の判定 = ターミナル.app の各タブの `processes` に **"claude"** が含まれるか。自分用ターミナルは zsh なので対象外。
+## セットアップ
+
+```sh
+git clone https://github.com/Takumi00Nine/dotfiles.git ~/work/dotfiles
+cd ~/work/dotfiles
+./install.sh
+```
+
+`install.sh` は次のシンボリックリンクを張る（既存の実ファイルは `*.pre-dotfiles.bak` に退避）:
+
+| リポジトリ内 | ライブの場所 |
+|---|---|
+| `hammerspoon/init.lua` | `~/.hammerspoon/init.lua` |
+| `tmux/tmux.conf` | `~/.tmux.conf` |
+| `ghostty/config` | `~/.config/ghostty/config` |
+
+反映:
+- tmux: `tmux source-file ~/.tmux.conf`（または再起動）
+- Hammerspoon: メニューバー 🔨 → Reload Config
+- Ghostty: `Cmd+Shift+,`（または再起動）
 
 ---
 
-## 既知の注意点 / トラブルシュート
-- **マイクON/OFFは必ずこのボタンで行う。** Hammerspoon が `micOn` を自前で数えているため、途中で右Commandを直接押したり動画を手動操作すると状態がズレることがある。ズレたらボタンを1回空押しすれば復帰。
-- **マイクは切り替わるが動画が止まらない** → Chrome のオートメーション権限、または「Apple Events からの JavaScript を許可」が未設定。
-- **動画は止まるがマイクが反応しない** → 合成した右Command を Codex が受け付けていない可能性。送出方法の調整が必要。
-- **再生再開だけ効かない** → Chrome の自動再生制限。タブを一瞬アクティブにしてから `play()` する等の対処を追加する。
-- **自分用ターミナルが前面に来てしまう** → `processes` 判定 "claude" の調整が必要（プロセス名が変わった場合など）。
+## 各設定のメモ
+
+### hammerspoon/
+Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。F18＝動画一時停止/再開＋マイク(右⌘)トグル＋claude端末フォーカス、F17＝claude端末を前面化して Enter 送信。詳細は [`hammerspoon/README.md`](hammerspoon/README.md)。
+
+### tmux/
+- prefix を `Ctrl+a` に変更（押下中はセッション名チップが赤く点灯）
+- `prefix + 矢印` で方向分割、`Shift + 矢印` でペイン移動
+- Claude / Codex の使用率をステータスバーに常時表示
+
+> ⚠️ ステータスバーは別リポジトリ [`usage-statusline`](https://github.com/Takumi00Nine/usage-statusline) の `tmux-usage.sh` を参照する（`status-right` に絶対パスで指定）。そちらを `~/work/usage-statusline` に置いていないとバーが出ない。
+
+### ghostty/
+- テーマ Catppuccin Mocha、`macos-option-as-alt`（Claude Code の Option ショートカット）
+- 起動時に `tmux new-session -A -s ai` で tmux セッション "ai" へ自動 attach/create
+- ※ Ghostty は行末コメント非対応（コメントは独立行に書く）
 
 ---
 
-## ファイル
-- `init.lua` — `~/.hammerspoon/init.lua` のバックアップ。復元時はこれを同パスにコピーして Reload Config。
+## ライセンス
+[MIT](LICENSE)
