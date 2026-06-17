@@ -18,11 +18,15 @@ dotfiles/
 │   └── tmux.conf       # prefix=Ctrl+a, 方向分割, Shift+矢印移動, 使用率ステータスバー 等
 ├── ghostty/
 │   └── config          # テーマ/フォント, Option=Alt, 起動時に tmux "ai" へ自動 attach 等
-└── install.sh          # 各設定を実体→ライブ位置へシンボリックリンク
+├── launchagents/
+│   └── com.takumi009.usage-refresh.plist  # 使用率を5分毎に取得する LaunchAgent
+└── install.sh          # symlink（設定）＋ copy（LaunchAgent）で導入
 ```
 
 各設定は **このリポジトリが実体**で、ライブの場所（`~/.tmux.conf` など）は**シンボリックリンク**にしている。
 → 編集はこのリポジトリ側だけで完結し、Git で履歴管理できる。
+
+※ ただし **LaunchAgent の plist だけは symlink ではなく実ファイルをコピー**する。launchd はログイン時の自動ロードで symlink を確実に追わないため（symlink にすると idle 時の定期実行が静かに止まるリスク）。`install.sh` がコピー後に `launchctl` で再ロードする。
 
 ---
 
@@ -34,18 +38,20 @@ cd ~/work/dotfiles
 ./install.sh
 ```
 
-`install.sh` は次のシンボリックリンクを張る（既存の実ファイルは `*.pre-dotfiles.bak` に退避）:
+`install.sh` は次を行う（既存の実ファイルは `*.pre-dotfiles.bak` に退避）:
 
-| リポジトリ内 | ライブの場所 |
-|---|---|
-| `hammerspoon/init.lua` | `~/.hammerspoon/init.lua` |
-| `tmux/tmux.conf` | `~/.tmux.conf` |
-| `ghostty/config` | `~/.config/ghostty/config` |
+| リポジトリ内 | ライブの場所 | 方式 |
+|---|---|---|
+| `hammerspoon/init.lua` | `~/.hammerspoon/init.lua` | symlink |
+| `tmux/tmux.conf` | `~/.tmux.conf` | symlink |
+| `ghostty/config` | `~/.config/ghostty/config` | symlink |
+| `launchagents/com.takumi009.usage-refresh.plist` | `~/Library/LaunchAgents/…` | **copy**（＋`launchctl` で再ロード）|
 
 反映:
 - tmux: `tmux source-file ~/.tmux.conf`（または再起動）
 - Hammerspoon: メニューバー 🔨 → Reload Config
 - Ghostty: `Cmd+Shift+,`（または再起動）
+- launchd: `install.sh` が自動で再ロード済み
 
 ---
 
