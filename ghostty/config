@@ -1,0 +1,32 @@
+# Ghostty — minimal config for AI CLI work (Claude Code / Codex, with tmux inside).
+# Edit and reload with  Cmd+Shift+,  (or restart Ghostty).
+# Preview other themes:  /Applications/Ghostty.app/Contents/MacOS/ghostty +list-themes
+# NOTE: Ghostty does not support inline (end-of-line) comments — keep comments on their own line.
+
+# ── Appearance ──
+theme = Catppuccin Mocha
+font-size = 14
+# font-family = "JetBrains Mono"
+cursor-style = block
+mouse-hide-while-typing = true
+# Padding (margin) between the terminal content and the window edge,
+# like macOS Terminal.app. x = left/right, y = top/bottom (pixels).
+window-padding-x = 8
+window-padding-y = 8
+# Keep padding even when the grid doesn't divide evenly (avoids uneven margins).
+window-padding-balance = true
+
+# ── Claude Code ──
+# Send Option as Alt/Meta so Option+Enter (newline) and Option+P (model switch) work.
+macos-option-as-alt = true
+
+# ── Startup ──
+# On launch, attach to the tmux session "ai" if it exists, otherwise create it.
+# (new-session -A = attach-if-exists, create-if-not.)
+command = /opt/homebrew/bin/tmux new-session -A -s ai
+
+# ── Quality of life ──
+copy-on-select = clipboard
+# Restore windows/tabs after quit or restart.
+window-save-state = always
+scrollback-limit = 10000000
