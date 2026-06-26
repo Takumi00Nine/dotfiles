@@ -1,3 +1,92 @@
+**English** | [日本語](#日本語)
+
+# dotfiles
+
+![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black)
+![Shell](https://img.shields.io/badge/shell-zsh-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+A collection of macOS configuration files for AI work (Claude Code / Codex).
+It brings together terminal settings (Ghostty + tmux) and Hammerspoon hotkeys for controlling AI terminals from a Keychron mouse.
+
+Environment: macOS (Apple Silicon)
+
+---
+
+## Structure
+
+```
+dotfiles/
+├── hammerspoon/
+│   ├── init.lua        # Keychron mouse → AI terminal control (F18: microphone/video toggle, F17: send Enter)
+│   └── README.md       # Detailed documentation for the above
+├── tmux/
+│   └── tmux.conf       # prefix=Ctrl+a, directional splits, Shift+arrow movement, usage status bar, etc.
+├── ghostty/
+│   └── config          # Theme/font, Option=Alt, automatically attach to tmux "ai" on launch, etc.
+├── launchagents/
+│   └── com.takumi009.usage-refresh.plist  # LaunchAgent that fetches usage every 5 minutes
+└── install.sh          # Install via symlink (configs) + copy (LaunchAgent)
+```
+
+Each configuration file has **this repository as its source of truth**, and the live locations (`~/.tmux.conf`, etc.) are **symbolic links**.
+This keeps edits confined to this repository and allows the history to be managed with Git.
+
+However, **only the LaunchAgent plist is copied as a real file instead of symlinked**. This is because launchd does not reliably follow symlinks during automatic loading at login, which can cause periodic idle-time execution to stop silently. `install.sh` reloads it with `launchctl` after copying it.
+
+---
+
+## Setup
+
+```sh
+git clone https://github.com/Takumi00Nine/dotfiles.git ~/work/dotfiles
+cd ~/work/dotfiles
+./install.sh
+```
+
+`install.sh` does the following (existing real files are backed up as `*.pre-dotfiles.bak`):
+
+| Repository path | Live location | Method |
+|---|---|---|
+| `hammerspoon/init.lua` | `~/.hammerspoon/init.lua` | symlink |
+| `tmux/tmux.conf` | `~/.tmux.conf` | symlink |
+| `ghostty/config` | `~/.config/ghostty/config` | symlink |
+| `launchagents/com.takumi009.usage-refresh.plist` | `~/Library/LaunchAgents/…` | **copy** (+ reload with `launchctl`) |
+
+Apply changes:
+- tmux: `tmux source-file ~/.tmux.conf` (or restart)
+- Hammerspoon: menu bar hammer icon -> Reload Config
+- Ghostty: `Cmd+Shift+,` (or restart)
+- launchd: `install.sh` has already reloaded it automatically
+
+---
+
+## Configuration Notes
+
+### hammerspoon/
+Hammerspoon configuration for controlling AI terminals with Keychron mouse buttons. F18 toggles video pause/resume + microphone (right command) + focuses the claude terminal; F17 brings the claude terminal to the front and sends Enter. See [`hammerspoon/README.md`](hammerspoon/README.md) for details.
+
+### tmux/
+- Changes prefix to `Ctrl+a` (while pressed, the session-name chip lights up red)
+- `prefix + arrow` creates directional splits, and `Shift + arrow` moves between panes
+- Always displays Claude / Codex usage in the status bar
+
+> Warning: The status bar references `tmux-usage.sh` from the separate repository [`usage-statusline`](https://github.com/Takumi00Nine/usage-statusline) via an absolute path in `status-right`. The bar will not appear unless that repository exists at `~/work/usage-statusline`.
+
+### ghostty/
+- Catppuccin Mocha theme and `macos-option-as-alt` (Option shortcuts for Claude Code)
+- On launch, automatically attaches to or creates the tmux session "ai" with `tmux new-session -A -s ai`
+- Ghostty does not support end-of-line comments (write comments on their own lines)
+
+---
+
+## License
+[MIT](LICENSE)
+
+---
+
+## 日本語
+
 # dotfiles
 
 AI 作業（Claude Code / Codex）まわりの macOS 設定ファイル集。
