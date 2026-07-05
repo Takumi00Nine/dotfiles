@@ -21,9 +21,12 @@ window-padding-balance = true
 macos-option-as-alt = true
 
 # ── Startup ──
-# On launch, attach to the tmux session "ai" if it exists, otherwise create it.
-# (new-session -A = attach-if-exists, create-if-not.)
-command = /opt/homebrew/bin/tmux new-session -A -s ai
+# In cmux: attach to (or create) a tmux session named after the workspace.
+# In plain Ghostty: falls back to the shared "ai" session.
+# Script lives in dotfiles at ghostty/start-tmux.sh.
+# DISABLED 2026-07-05: tmux auto-start conflicts with `cmux claude-teams`
+# (its tmux shim must own pane management). Re-enable by uncommenting.
+# command = /Users/takumi009/.config/ghostty/start-tmux.sh
 
 # ── Quality of life ──
 copy-on-select = clipboard

@@ -41,9 +41,13 @@ install_launchagent() {  # install_launchagent <plist filename under launchagent
   fi
 }
 
-link hammerspoon/init.lua "$HOME/.hammerspoon/init.lua"
-link tmux/tmux.conf       "$HOME/.tmux.conf"
-link ghostty/config       "$HOME/.config/ghostty/config"
+link hammerspoon/init.lua        "$HOME/.hammerspoon/init.lua"
+link tmux/tmux.conf              "$HOME/.tmux.conf"
+link ghostty/config              "$HOME/.config/ghostty/config"
+link ghostty/start-tmux.sh           "$HOME/.config/ghostty/start-tmux.sh"
+link ghostty/cmux-session-cleanup.sh "$HOME/.config/ghostty/cmux-session-cleanup.sh"
+link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
+chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh"
 
 install_launchagent com.takumi009.usage-refresh.plist
 
