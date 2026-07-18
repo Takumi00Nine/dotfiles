@@ -5,6 +5,7 @@
 #   Claude
 #    5h ██████░░  54% ↻3:04
 #    7d ░░░░░░░░   6% ↻27:24
+#    F5 ███░░░░░  38%
 #
 #   Codex
 #    5h ░░░░░░░░   5% ↻2:57
@@ -72,10 +73,11 @@ window_line() {
   printf '%s\n' "$RESET"
 }
 
-# サービス1つ分のブロック（ヘッダー行＋5h/7d 行）
+# サービス1つ分のブロック（ヘッダー行＋5h/7d/F5 行。F5 は show_model_weekly=1
+# の場合のみ、モデル別週次上限＝Fable の使用率＝claude 側にだけ付く）
 service_block() {
-  local file="$1" name="$2" color_num="$3"
-  local h d r rd fetched err age
+  local file="$1" name="$2" color_num="$3" show_model_weekly="$4"
+  local h d f5 r rd fetched err age
   printf '%s[38;5;%s;1m%s%s' "$ESC" "$color_num" "$name" "$RESET"
   if [ ! -f "$file" ]; then
     printf ' %sn/a%s\n' "$DIM" "$RESET"
@@ -101,6 +103,14 @@ service_block() {
   rd="$(read_field "$file" '.seven_day.resets_at_epoch')"
   window_line "5h" "$h" "$r"
   window_line "7d" "$d" "$rd"
+  if [ "$show_model_weekly" = "1" ]; then
+    # F5 (Fable の週次モデル別上限): 7d と同じリセット時刻なので、専用の
+    # リセットカウントダウンは付けない（epoch に空文字を渡すと非数値
+    # 扱いになり ↻ が出ない）。キャッシュに窓が無い場合も行自体は出し、
+    # 既存の非数値分岐（-- 表示）に乗せる。
+    f5="$(read_field "$file" '.model_weekly.used_percent')"
+    window_line "F5" "$f5" ""
+  fi
 }
 
 render() {
@@ -109,9 +119,9 @@ render() {
     printf '%susage ERR (jq not found)%s\n' "$ERR_C" "$RESET"
     return
   fi
-  service_block "$CACHE_DIR/claude-cache.json" "Claude" 39
+  service_block "$CACHE_DIR/claude-cache.json" "Claude" 39 1
   printf '\n'
-  service_block "$CACHE_DIR/codex-cache.json" "Codex" 213
+  service_block "$CACHE_DIR/codex-cache.json" "Codex" 213 0
 }
 
 main() {
