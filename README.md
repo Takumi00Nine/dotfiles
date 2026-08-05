@@ -64,7 +64,7 @@ Apply changes:
 ## Configuration Notes
 
 ### hammerspoon/
-Hammerspoon configuration for controlling AI terminals with Keychron mouse buttons. F18 toggles video pause/resume + microphone (right command) + focuses the claude terminal; F17 brings the claude terminal to the front and sends Enter. See [`hammerspoon/README.md`](hammerspoon/README.md) for details.
+Hammerspoon configuration for controlling AI terminals with Keychron mouse buttons. F18 toggles video pause/resume + microphone (right command) + focuses the claude terminal; F17 brings the claude terminal to the front and sends Enter. See [`hammerspoon/README.md`](hammerspoon/README.md) for details. The `nape_pro/` submodule adds a full Nape Pro trackball keymap (01/02/M1/M2 + dial + combos); see [`hammerspoon/nape_pro/SETUP.md`](hammerspoon/nape_pro/SETUP.md).
 
 ### tmux/
 - Changes prefix to `Ctrl+a` (while pressed, the session-name chip lights up red)
@@ -147,7 +147,7 @@ cd ~/work/dotfiles
 ## 各設定のメモ
 
 ### hammerspoon/
-Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。F18＝動画一時停止/再開＋マイク(右⌘)トグル＋claude端末フォーカス、F17＝claude端末を前面化して Enter 送信。詳細は [`hammerspoon/README.md`](hammerspoon/README.md)。
+Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。F18＝動画一時停止/再開＋マイク(右⌘)トグル＋claude端末フォーカス、F17＝claude端末を前面化して Enter 送信。詳細は [`hammerspoon/README.md`](hammerspoon/README.md)。`nape_pro/` サブモジュールに Nape Pro トラックボール向けの本格キーマップ(01/02/M1/M2 + ダイヤル + コンボ)を追加済み。セットアップ手順は [`hammerspoon/nape_pro/SETUP.md`](hammerspoon/nape_pro/SETUP.md)。
 
 ### tmux/
 - prefix を `Ctrl+a` に変更（押下中はセッション名チップが赤く点灯）
