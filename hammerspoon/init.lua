@@ -36,14 +36,28 @@ local function sendRightCmd()
   hs.eventtap.event.newKeyEvent(54, false):post()
 end
 
+-- F18 (2026-08-05 変更): Nape Pro キーマップ v1 Stage 1 導入に伴い、
+-- ロジックの実体を nape_pro モジュールへ移設(M1タップの後継として同じF18コードを再利用。
+-- 詳細・移行理由は nape_pro/SETUP.md の「設計判断1」参照)。
+-- nape_pro の読み込みに失敗した場合は、上の3関数(旧ロジックそのまま)へフォールバックする
+-- (「既存動作を壊さない」を最優先=新モジュールが壊れてもF18は必ず何かしら動く)。
 hs.hotkey.bind({}, "F18", function()
+  -- require の失敗だけでなく、micToggle() 実行中の例外(setup未完了・内部バグ等)も
+  -- まとめて pcall で捕捉し、どちらの失敗でも旧ロジックへフォールバックする
+  -- (Codexレビュー2026-08-05指摘: requireだけをpcallしても micToggle() 自体の例外は
+  --  素通りしてしまい、ホットキーコールバックがエラーになる問題があった)。
+  local ok, errOrModule = pcall(function()
+    local naplePro = require("nape_pro")
+    naplePro.micToggle()
+  end)
+  if ok then return end
+
+  hs.alert.show("nape_pro F18 handling failed, falling back to legacy logic: " .. tostring(errOrModule))
   if not micOn then
-    -- ▶ マイクON：動画停止 → マイクON（端末へはフォーカスを移さない）
     chromePausePlaying()
     sendRightCmd()
     micOn = true
   else
-    -- ⏹ マイクOFF：マイクOFF → 0.15秒 → 動画再開
     sendRightCmd()
     hs.timer.usleep(150000)
     chromeResumeTagged()
@@ -52,6 +66,25 @@ hs.hotkey.bind({}, "F18", function()
 end)
 
 -- F17: Enter を1回送る（最前面のアプリへ）
+-- 現状維持。Nape Pro 新配列では M2タップは実Enterキー直送(Hammerspoon非経由)を
+-- 採用したためF17は使わない設計だが、旧物理ボタンの移行が終わるまで残す
+-- (詳細は nape_pro/SETUP.md の「設計判断2」参照)。
 hs.hotkey.bind({}, "F17", function()
   hs.eventtap.keyStroke({}, "return", 0)
 end)
+
+----------------------------------------------------------------------
+-- Nape Pro キーマップ v1 Stage 1 (2026-08-05)
+-- 01/02/M1ホールド/M2/ダイヤル/コンボ 一式は hammerspoon/nape_pro/ に分離実装。
+-- pcall で保護し、失敗しても上記の F17/F18 の登録には影響しない。
+----------------------------------------------------------------------
+package.path = hs.configdir .. "/?/init.lua;" .. hs.configdir .. "/?.lua;" .. package.path
+local napeProOk, napeProModuleOrErr = pcall(require, "nape_pro")
+if napeProOk then
+  local setupOk, setupErr = pcall(napeProModuleOrErr.setup)
+  if not setupOk then
+    hs.alert.show("nape_pro.setup() failed: " .. tostring(setupErr))
+  end
+else
+  hs.alert.show("nape_pro module failed to load: " .. tostring(napeProModuleOrErr))
+end
