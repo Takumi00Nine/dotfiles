@@ -170,8 +170,9 @@ assert_contains "next値のダブルクォートが剥がされる" "$PLAIN1" "�
 assert_not_contains "next値のダブルクォートそのものは残らない" "$PLAIN1" '"配布方式のたたき台を書く"'
 assert_order "updated（無ければdate）降順で並ぶ・未設定は最後" "$PLAIN1" \
   "配布方式のたたき台を書く" "(next未設定)" "実データ照合を回す" "日付なしプロジェクト"
-assert_contains "外部脳セクションのn/a（棚卸しディレクトリ無し）" "$PLAIN1" "棚卸し n/a"
+assert_not_contains "棚卸し・週次どちらもデータ源が無ければ棚卸し行は出ない" "$PLAIN1" "棚卸し"
 assert_not_contains "週次メンテ状態ファイルが無い時はこの行を省略する" "$PLAIN1" "週次"
+assert_not_contains "外部脳データ源が両方無ければブロック（見出し含む）ごと非表示" "$PLAIN1" "外部脳"
 
 echo "=== fixture: 名前の10文字切り詰め（省略記号なし） ==="
 V2="$WORKDIR/vault2"
@@ -459,10 +460,13 @@ OUT7="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_BROKEN" \
 assert_contains "10日前の週次メンテは⚠10日前と表示される" "$OUT7" "週次 ⚠10日前"
 assert_contains "警告が1つでもあればヘッダーは⚠ 外部脳" "$OUT7" "⚠ 外部脳"
 
+echo "=== 新仕様: 棚卸しディレクトリ無し・週次のみデータあり→棚卸し行は出ず週次行のみ表示 ==="
+OUT_MAINTONLY="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/inventory-no-such-dir" CMUX_NEXT_MAINT_STATE="$MAINT_OK" "$TARGET" --once | strip_ansi)"
+assert_not_contains "棚卸しのデータ源（ディレクトリ）が無ければ棚卸し行は出ない" "$OUT_MAINTONLY" "棚卸し"
+assert_contains "週次のみデータありなら週次行は表示される" "$OUT_MAINTONLY" "週次 ✅"
+assert_contains "片方でもデータ源があればブロック自体（見出し）は出る" "$OUT_MAINTONLY" "✅ 外部脳"
+
 echo "=== fixture: 両方正常ならヘッダーは✅ 外部脳 ==="
-assert_contains "棚卸し0件・週次新しい→✅ 外部脳" \
-  "$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/inventory-zero" CMUX_NEXT_MAINT_STATE="$MAINT_OK" "$TARGET" --once | strip_ansi)" \
-  "棚卸し n/a"
 INV_ZERO="$WORKDIR/inventory-zero2"
 mkdir -p "$INV_ZERO"
 cat >"$INV_ZERO/2026-08-05.md" <<'EOF'
@@ -471,6 +475,56 @@ EOF
 OUT8="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_ZERO" CMUX_NEXT_MAINT_STATE="$MAINT_OK" "$TARGET" --once | strip_ansi)"
 assert_contains "棚卸し0件は要確認0件と表示" "$OUT8" "要確認0件"
 assert_contains "棚卸し0件・週次新しい→ヘッダーは✅ 外部脳" "$OUT8" "✅ 外部脳"
+
+echo "=== 新仕様: Projectsディレクトリが空でも稼働中(0)/保留(0)見出しが必ず出る ==="
+V13="$WORKDIR/vault13-empty-projects"
+mkdir -p "$V13/Projects"
+OUT13="$(CMUX_NEXT_VAULT="$V13" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
+  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
+assert_contains "Projects空でも稼働中(0)見出しが出る" "$OUT13" "▶ 稼働中 (0)"
+assert_contains "Projects空でも保留(0)見出しが出る" "$OUT13" "⏸ 保留 (0)"
+
+echo "=== 新仕様: Projectsディレクトリ自体が無くても稼働中(0)/保留(0)見出しが出る ==="
+V14="$WORKDIR/vault14-no-projects-dir"
+mkdir -p "$V14"
+OUT14="$(CMUX_NEXT_VAULT="$V14" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
+  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
+assert_contains "Projectsディレクトリ不在でも稼働中(0)見出しが出る" "$OUT14" "▶ 稼働中 (0)"
+assert_contains "Projectsディレクトリ不在でも保留(0)見出しが出る" "$OUT14" "⏸ 保留 (0)"
+
+echo "=== 新仕様: 保留のみ・稼働中0件でも両見出しが出る ==="
+V15="$WORKDIR/vault15-hold-only"
+mkdir -p "$V15/Projects"
+cat >"$V15/Projects/proj-hold-only.md" <<'EOF'
+---
+date: 2026-07-01
+status: paused
+next: 保留のみのケース
+---
+EOF
+OUT15="$(CMUX_NEXT_VAULT="$V15" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
+  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
+assert_contains "保留のみでも稼働中(0)見出しが出る" "$OUT15" "▶ 稼働中 (0)"
+assert_contains "保留のみでは保留(1)見出しが出る" "$OUT15" "⏸ 保留 (1)"
+assert_contains "保留のみのnext値が表示される" "$OUT15" "保留のみのケース"
+
+echo "=== 新仕様: 外部脳データ源が両方無ければブロック（見出し含む）ごと非表示 ==="
+assert_not_contains "棚卸し行が出ない（データ源なし・Projects空fixture流用）" "$OUT13" "棚卸し"
+assert_not_contains "週次行が出ない（データ源なし）" "$OUT13" "週次"
+assert_not_contains "外部脳ヘッダー(✅)も出ない" "$OUT13" "✅ 外部脳"
+assert_not_contains "外部脳ヘッダー(⚠)も出ない" "$OUT13" "⚠ 外部脳"
+
+echo "=== 新仕様: 棚卸しのみデータあり（週次は状態ファイル無し）→棚卸し行のみ表示 ==="
+INV_ONLY="$WORKDIR/inventory-only"
+mkdir -p "$INV_ONLY"
+cat >"$INV_ONLY/2026-08-05.md" <<'EOF'
+自動生成。要確認 2 件。
+EOF
+OUT16="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_ONLY" \
+  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
+assert_contains "棚卸しのみデータありなら棚卸し行が出る" "$OUT16" "要確認2件"
+assert_not_contains "週次のデータ源（状態ファイル）が無ければ週次行は出ない" "$OUT16" "週次"
+assert_contains "片方でもデータ源があればブロック自体（見出し）は出る" "$OUT16" "外部脳"
 
 echo "=== fixture: jqが無い環境ではERRを出す ==="
 STUBDIR="$WORKDIR/stubbin"

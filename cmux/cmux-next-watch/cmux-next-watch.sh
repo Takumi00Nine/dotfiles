@@ -255,44 +255,46 @@ render_next() {
   count_a="$(printf '%s\n' "$entries" | grep -c '^A' | tr -d ' ')"
   count_h="$(printf '%s\n' "$entries" | grep -c '^H' | tr -d ' ')"
 
-  if [ -z "$entries" ]; then
-    printf '%s▶ 稼働中 (0)%s\n' "$LBL_BOLD" "$RESET"
-    return
-  fi
+  # 稼働中セクションの見出しは、対象0件（データ源が無いサブ機・単に該当ゼロの
+  # 両方）でも常に出す（本人確定仕様: 意味のない非表示より「0件」の方が
+  # データ源の有無に依らず状態を正しく伝える）。以降の一覧行は対象があれば
+  # 続けて出す。
+  printf '%s▶ 稼働中 (%d)%s\n' "$LBL_BOLD" "$count_a" "$RESET"
   cols="$(cols_now)"
-  # グループが変わるタイミングでセクション見出しを出す（A=稼働中・H=保留）。
+  # グループが変わるタイミングで保留見出しを出す（A=稼働中は既に上で出力済み）。
   # 番号はセクションをまたいで通し（「Nextの11番」で保留組も参照可能）。
   # 番号は恒久ID ではなくその時点の表示順。AI 側の解決は --list を使う。
   # name・nextraw は tmpfile へ書く前に既にサニタイズ済み（collect_entries の
   # コメント参照）。ここでは切り詰めのみ行う。
-  idx=0
-  cur_grp=""
-  printf '%s\n' "$entries" | while IFS="$(printf '\t')" read -r grp sortkey name nextraw; do
-    if [ "$grp" != "$cur_grp" ]; then
-      case "$grp" in
-        A) printf '%s▶ 稼働中 (%d)%s\n' "$LBL_BOLD" "$count_a" "$RESET" ;;
-        H)
-          [ -n "$cur_grp" ] && printf '\n'
-          printf '%s⏸ 保留 (%d)%s\n' "$DIM_BOLD" "$count_h" "$RESET"
-          ;;
-      esac
-      cur_grp="$grp"
-    fi
-    idx=$(( idx + 1 ))
-    numw=${#idx}
-    name_disp="$(truncate_plain "$name" 10)"
-    name_len="$(jq -Rr 'length' <<<"$name_disp" 2>/dev/null)"
-    is_number "$name_len" || name_len=10
-    remw=$(( cols - numw - 1 - name_len - 1 ))
-    [ "$remw" -lt 1 ] && remw=1
-    if [ -z "$nextraw" ]; then
-      next_disp="$(truncate_disp "(next未設定)" "$remw")"
-      printf '%s%d%s %s%s%s %s%s%s\n' "$DIM" "$idx" "$RESET" "$LBL" "$name_disp" "$RESET" "$DIM" "$next_disp" "$RESET"
-    else
-      next_disp="$(truncate_disp "$nextraw" "$remw")"
-      printf '%s%d%s %s%s%s %s%s%s\n' "$DIM" "$idx" "$RESET" "$LBL" "$name_disp" "$RESET" "$LBL" "$next_disp" "$RESET"
-    fi
-  done
+  if [ -n "$entries" ]; then
+    idx=0
+    cur_grp="A"
+    printf '%s\n' "$entries" | while IFS="$(printf '\t')" read -r grp sortkey name nextraw; do
+      if [ "$grp" = "H" ] && [ "$cur_grp" != "H" ]; then
+        printf '\n%s⏸ 保留 (%d)%s\n' "$DIM_BOLD" "$count_h" "$RESET"
+        cur_grp="H"
+      fi
+      idx=$(( idx + 1 ))
+      numw=${#idx}
+      name_disp="$(truncate_plain "$name" 10)"
+      name_len="$(jq -Rr 'length' <<<"$name_disp" 2>/dev/null)"
+      is_number "$name_len" || name_len=10
+      remw=$(( cols - numw - 1 - name_len - 1 ))
+      [ "$remw" -lt 1 ] && remw=1
+      if [ -z "$nextraw" ]; then
+        next_disp="$(truncate_disp "(next未設定)" "$remw")"
+        printf '%s%d%s %s%s%s %s%s%s\n' "$DIM" "$idx" "$RESET" "$LBL" "$name_disp" "$RESET" "$DIM" "$next_disp" "$RESET"
+      else
+        next_disp="$(truncate_disp "$nextraw" "$remw")"
+        printf '%s%d%s %s%s%s %s%s%s\n' "$DIM" "$idx" "$RESET" "$LBL" "$name_disp" "$RESET" "$LBL" "$next_disp" "$RESET"
+      fi
+    done
+  fi
+  # 稼働中側だけでループが終わった（保留が0件）場合は、上のwhile内では保留
+  # 見出しを出す機会が無いため、ここで0件見出しを補う。
+  if [ "$count_h" -eq 0 ]; then
+    printf '\n%s⏸ 保留 (0)%s\n' "$DIM_BOLD" "$RESET"
+  fi
 }
 
 # 棚卸しレポート（vault-inventory）の最新ファイル（名前順＝日付ファイル名
@@ -325,6 +327,23 @@ inventory_status() {
   printf '%s\t%d/%d\n' "$count" "$mm" "$dd"
 }
 
+# 棚卸しの「データ源」の有無だけを判定する（実在する暦日ファイル名の最新
+# レポートが1件でも見つかるか）。件数抽出（inventory_status）の成否とは
+# 独立させる: ディレクトリごと無い／該当ファイルが無いサブ機ではデータ源
+# 無しとして render_extbrain 側で行自体を出さないが、レポートファイルは
+# あるのに「要確認 N件」パターン抽出だけ失敗した場合はデータ源有りとして
+# 従来通り n/a を表示する（本人確定仕様: 判定はmachine-role等ではなくデータ
+# 駆動）。
+inventory_has_source() {
+  local f base
+  for f in "$INVENTORY_DIR"/*.md; do
+    [ -e "$f" ] || continue
+    base="$(basename "$f" .md)"
+    is_valid_date "$base" && return 0
+  done
+  return 1
+}
+
 # 週次メンテ（maintenance.sh）の死活状態を last-run.json の last_success_at
 # （無ければ started_at）から判定する。見つかれば
 # "ok_or_warn<TAB>表示テキスト" を標準出力へ、状態ファイルが無い／壊れて
@@ -353,8 +372,20 @@ maintenance_status() {
 
 # セクション2「外部脳」: 棚卸し件数・週次メンテ死活の2行（片方または両方が
 # 取得できないときはその行を省略する）と、警告有無に応じたヘッダーを表示する。
+# ブロック全体（ヘッダー含む）は、棚卸し・週次いずれのデータ源も実在しない
+# 場合にのみ非表示にする（本人確定仕様: 判定は machine-role 等の役割判定では
+# なくデータ駆動。データ源を一切持たないサブ機で「棚卸し n/a」等の意味の無い
+# 表示が出ていた問題への対処）。片方でもデータ源があればブロックは出し、
+# データ源が無い側の行だけを省略する。
 render_extbrain() {
   local inv_out inv_count inv_date maint_out maint_kind maint_disp has_warn=0
+  local inv_src=0 maint_src=0
+
+  inventory_has_source && inv_src=1
+  [ -f "$MAINT_STATE_FILE" ] && maint_src=1
+  if [ "$inv_src" -eq 0 ] && [ "$maint_src" -eq 0 ]; then
+    return
+  fi
 
   inv_out="$(inventory_status)"
   maint_out="$(maintenance_status)"
@@ -374,16 +405,18 @@ render_extbrain() {
     printf '%s✅ 外部脳%s\n' "$GOOD_BOLD" "$RESET"
   fi
 
-  if [ -n "$inv_out" ]; then
-    inv_count="${inv_out%%$(printf '\t')*}"
-    inv_date="${inv_out#*$(printf '\t')}"
-    if [ "$inv_count" -ge 1 ] 2>/dev/null; then
-      printf '%s棚卸し 要確認%s件 (%s)%s\n' "$WARN_C" "$inv_count" "$inv_date" "$RESET"
+  if [ "$inv_src" -eq 1 ]; then
+    if [ -n "$inv_out" ]; then
+      inv_count="${inv_out%%$(printf '\t')*}"
+      inv_date="${inv_out#*$(printf '\t')}"
+      if [ "$inv_count" -ge 1 ] 2>/dev/null; then
+        printf '%s棚卸し 要確認%s件 (%s)%s\n' "$WARN_C" "$inv_count" "$inv_date" "$RESET"
+      else
+        printf '%s棚卸し 要確認%s件 (%s)%s\n' "$GOOD_C" "$inv_count" "$inv_date" "$RESET"
+      fi
     else
-      printf '%s棚卸し 要確認%s件 (%s)%s\n' "$GOOD_C" "$inv_count" "$inv_date" "$RESET"
+      printf '%s棚卸し n/a%s\n' "$DIM" "$RESET"
     fi
-  else
-    printf '%s棚卸し n/a%s\n' "$DIM" "$RESET"
   fi
 
   if [ -n "$maint_out" ]; then
