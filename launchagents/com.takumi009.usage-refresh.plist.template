@@ -1,18 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: install.sh replaces __DOTFILES_HOME__ with the real $HOME at
+     install time and writes the result to ~/Library/LaunchAgents. Paths here
+     must not be hardcoded to any one user's home directory (that broke
+     install on machines with a different username). -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>com.takumi009.usage-refresh</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/takumi009/work/claude-codex-usage/refresh.sh</string>
+        <string>__DOTFILES_HOME__/work/claude-codex-usage/refresh.sh</string>
         <string>all</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/takumi009/.anyenv/envs/nodenv/shims:/usr/bin:/bin</string>
+        <string>__DOTFILES_HOME__/.anyenv/envs/nodenv/shims:/usr/bin:/bin</string>
     </dict>
     <key>StartInterval</key>
     <integer>300</integer>
