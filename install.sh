@@ -59,7 +59,14 @@ link ghostty/config              "$HOME/.config/ghostty/config"
 link ghostty/start-tmux.sh           "$HOME/.config/ghostty/start-tmux.sh"
 link ghostty/cmux-session-cleanup.sh "$HOME/.config/ghostty/cmux-session-cleanup.sh"
 link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
-chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh"
+# cmux 本体設定・ドック定義・Next ペイン表示ツール（2026-08-06 追加。
+# cmux.json=通知フィルタ等 / dock.json=Usage・Next・System の3コントロール /
+# cmux-next-watch=dock.json から起動される表示スクリプト。tools/ 側の参照
+# パス互換のため ~/work/tools/cmux-next-watch にも symlink を張る）
+link cmux/cmux.json                  "$HOME/.config/cmux/cmux.json"
+link cmux/dock.json                  "$HOME/.config/cmux/dock.json"
+link cmux/cmux-next-watch            "$HOME/work/tools/cmux-next-watch"
+chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh" "$DIR/cmux/cmux-next-watch/cmux-next-watch.sh"
 
 install_launchagent com.takumi009.usage-refresh.plist
 
