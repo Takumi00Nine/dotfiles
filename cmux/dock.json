@@ -1,0 +1,20 @@
+{
+  "controls": [
+    {
+      "id": "usage",
+      "title": "Usage",
+      "command": "/Users/takumi009/work/dotfiles/cmux/cmux-usage-watch.sh",
+      "height": 140
+    },
+    {
+      "id": "next",
+      "title": "Next",
+      "command": "/Users/takumi009/work/tools/cmux-next-watch/cmux-next-watch.sh"
+    },
+    {
+      "id": "system",
+      "title": "System",
+      "command": "/Users/takumi009/work/dotfiles/cmux/cmux-system-watch.sh"
+    }
+  ]
+}
