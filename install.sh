@@ -126,6 +126,28 @@ install_usage_refresh_launchagent() {
   install_launchagent "$dest"
 }
 
+# append_zsh_aliases_source: ~/.zshrc の末尾に cc/cct 関数(zsh/aliases.zsh)への
+# source行を追記する。冪等（目印コメント`# dotfiles-managed`をgrepし、既に
+# あれば何もしない）。既存の.zshrc内容は一切変更・並べ替えせず末尾追記のみ、
+# .zshrcが無ければ新規作成する。メイン機の実.zshrcは直書きのcc/cct定義を
+# まだ持っており、そちらの除去（source行への一本化）は別途本人が行う
+# （このスクリプトは追記のみを担当）。
+append_zsh_aliases_source() {
+  local zshrc="$HOME/.zshrc" marker="# dotfiles-managed"
+  local src_line
+  src_line='[ -r "$HOME/work/dotfiles/zsh/aliases.zsh" ] && source "$HOME/work/dotfiles/zsh/aliases.zsh"  '"$marker"
+  if [ -f "$zshrc" ] && grep -qF "$marker" "$zshrc" 2>/dev/null; then
+    echo "skip: ~/.zshrcには既にdotfiles-managedのalias source行があります"
+    return
+  fi
+  if [ -s "$zshrc" ]; then
+    printf '\n%s\n' "$src_line" >> "$zshrc"
+  else
+    printf '%s\n' "$src_line" >> "$zshrc"
+  fi
+  echo "appended: $zshrc <- zsh/aliases.zsh source line"
+}
+
 link hammerspoon/init.lua        "$HOME/.hammerspoon/init.lua"
 link tmux/tmux.conf              "$HOME/.tmux.conf"
 link ghostty/config              "$HOME/.config/ghostty/config"
@@ -142,6 +164,7 @@ link cmux/cmux-next-watch            "$HOME/work/tools/cmux-next-watch"
 chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh" "$DIR/cmux/cmux-next-watch/cmux-next-watch.sh"
 
 install_usage_refresh_launchagent
+append_zsh_aliases_source
 
 cat <<'EOF'
 
@@ -151,4 +174,6 @@ Done. Apply each config:
   - Ghostty:     Cmd+Shift+,                     (or restart Ghostty)
   - launchd:     usage-refresh agent (re)loaded above, or skipped/WARNed
                  if claude-codex-usage isn't present on this machine
+  - zsh:         cc/cct source line added to ~/.zshrc if missing
+                 (restart zsh, or: source ~/.zshrc)
 EOF
