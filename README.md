@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 A collection of macOS configuration files for AI work (Claude Code / Codex).
-It brings together terminal settings (Ghostty + tmux), Hammerspoon hotkeys (Keychron mouse + Nape Pro trackball) for controlling AI terminals, and a [`cmux`](https://cmux.io) integration suite (Dock status panes, Agent Teams launcher, notification filtering).
+It brings together terminal settings (Ghostty + tmux), Hammerspoon hotkeys (Keychron mouse + Nape Pro trackball) for controlling AI terminals, and a [`cmux`](https://cmux.com) integration suite (Dock status panes, Agent Teams launcher, notification filtering).
 
 Environment: macOS (Apple Silicon)
 
@@ -125,7 +125,7 @@ Hammerspoon configuration for controlling AI terminals with Keychron mouse butto
 - Ghostty does not support end-of-line comments (write comments on their own lines)
 
 ### cmux/
-Integration with the [`cmux`](https://cmux.io) terminal: notification filtering (`cmux.json`), three Dock status panes (Usage/Next/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Next pane's project/external-brain display. The Usage pane's rendering script and its refresh LaunchAgent live in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo. See [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) for the LaunchAgent that automatically repairs a degraded Dock after cmux relaunches.
+Integration with the [`cmux`](https://cmux.com) terminal: notification filtering (`cmux.json`), three Dock status panes (Usage/Next/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Next pane's project/external-brain display. The Usage pane's rendering script and its refresh LaunchAgent live in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo. See [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) for the LaunchAgent that automatically repairs a degraded Dock after cmux relaunches.
 
 ### zsh/
 `cc` (`cd ~/Claude && claude`) and `cct` (`cd ~/Claude && cmux claude-teams ...`, with cmux notification-hook and `--teammate-mode in-process` injection unless the caller already passed one of those flags). See [zsh: append, not symlink](#zsh-append-not-symlink) above for how it gets wired into `~/.zshrc`.
@@ -160,7 +160,7 @@ lua hammerspoon/tests/nape_pro_smoke_spec.lua
 # dotfiles
 
 AI 作業（Claude Code / Codex）まわりの macOS 設定ファイル集。
-ターミナル（Ghostty + tmux）、Keychron マウス／Nape Pro トラックボールから AI 端末を操作する Hammerspoon ホットキー、[`cmux`](https://cmux.io) 統合（Dockステータスペイン・Agent Teams ランチャー・通知フィルタ）をまとめている。
+ターミナル（Ghostty + tmux）、Keychron マウス／Nape Pro トラックボールから AI 端末を操作する Hammerspoon ホットキー、[`cmux`](https://cmux.com) 統合（Dockステータスペイン・Agent Teams ランチャー・通知フィルタ）をまとめている。
 
 環境: macOS (Apple Silicon)
 
@@ -278,7 +278,7 @@ Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。
 - ※ Ghostty は行末コメント非対応（コメントは独立行に書く）
 
 ### cmux/
-[`cmux`](https://cmux.io) ターミナルとの統合。通知フィルタ（`cmux.json`）、3つのDockステータスペイン（Usage/Next/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Nextペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプトと対応するrefresh用LaunchAgentは別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側にある。cmux再起動後にDockが壊れたままにならないよう自動修復するLaunchAgentの詳細は [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) 参照。
+[`cmux`](https://cmux.com) ターミナルとの統合。通知フィルタ（`cmux.json`）、3つのDockステータスペイン（Usage/Next/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Nextペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプトと対応するrefresh用LaunchAgentは別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側にある。cmux再起動後にDockが壊れたままにならないよう自動修復するLaunchAgentの詳細は [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) 参照。
 
 ### zsh/
 `cc`（`cd ~/Claude && claude`）と `cct`（`cd ~/Claude && cmux claude-teams ...`。呼び出し側が該当フラグを渡していなければcmux通知フックと`--teammate-mode in-process`を注入）を定義。`~/.zshrc` への配線方式は上の[「zsh: symlinkではなく追記」](#zsh-symlinkではなく追記)参照。
