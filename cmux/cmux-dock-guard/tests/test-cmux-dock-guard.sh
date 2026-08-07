@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cmux-dock-guard.sh のユニットテスト。実cmux・実launchd・実HOMEには一切依存
-# しない。PATH上に偽の cmux/pgrep/ps を置き、待ち時間env(SETTLE等)は0にして
+# しない。PATH上に偽の cmux/ps/pgrep を置き、待ち時間env(SETTLE等)は0にして
 # 高速に実行する。
 #
 # 実行方法: bash tests/test-cmux-dock-guard.sh
@@ -23,14 +23,15 @@ assert_eq() {
   if [ "$expected" = "$actual" ]; then pass "$desc"; else fail_case "$desc (expected=$expected actual=$actual)"; fi
 }
 
-# --- 偽cmux/pgrep/psをPATHへ配置する ---
+# --- 偽cmux/ps/pgrepをPATHへ配置する ---
 # STUB_DIR配下の状態ファイルで挙動を制御する:
 #   cmux_up            存在すればping成功
-#   app_pid            pgrepが返すPID
+#   app_pid            psが返すcmux.appプロセスのPID
 #   app_start          psが返すlstart文字列（変えると別インスタンス扱い）
 #   observed_titles     tree --allが返すdock:globalタイトル一覧（改行区切り）
-#   reload_fixes        存在すればreload-configでobserved_titlesがhealthy_titlesへ置換
-#   healthy_titles       reload-config成功時・new-window再シード時に使うタイトル一覧
+#   healthy_titles       new-window再シード時に使うタイトル一覧
+#   alive_patterns       pgrepで「生きている」ことにするコマンドbasename一覧
+#                        （改行区切り。dock_processes_aliveが参照する）
 #   windows.tsv          "<id>\t<index>" 1行1ウィンドウ
 #   ws_owner.tsv          "<workspace_id>\t<window_id>"
 #   calls.log             stubが呼ばれた引数列のログ（検証用）
@@ -50,12 +51,6 @@ cmd="\${1:-}"; shift || true
 case "\$cmd" in
   ping)
     [ -f "\$STUB_DIR/cmux_up" ] && exit 0 || exit 1
-    ;;
-  reload-config)
-    if [ -f "\$STUB_DIR/reload_fixes" ]; then
-      cp "\$STUB_DIR/healthy_titles" "\$STUB_DIR/observed_titles"
-    fi
-    exit 0
     ;;
   tree)
     titles=""
@@ -103,6 +98,9 @@ EOF2
     printf '%s\t%s\n' "\${newid}-default" "\$newid" >> "\$STUB_DIR/ws_owner.tsv"
     if [ -f "\$STUB_DIR/newwin_reseeds" ]; then
       cp "\$STUB_DIR/healthy_titles" "\$STUB_DIR/observed_titles"
+    fi
+    if [ -f "\$STUB_DIR/newwin_revives_processes" ]; then
+      cp "\$STUB_DIR/healthy_alive_patterns" "\$STUB_DIR/alive_patterns"
     fi
     exit 0
     ;;
@@ -189,6 +187,21 @@ fi
 exit 1
 STUB
   chmod +x "$stub_bin/ps"
+
+  # dock_processes_alive用。本体は `pgrep -f -- "<basename>"` の形で呼ぶ
+  # （最後の引数がパターン）。alive_patternsに完全一致する行があれば「生存」
+  # として偽PIDを返す。
+  cat > "$stub_bin/pgrep" <<STUB
+#!/usr/bin/env bash
+STUB_DIR="$stub_dir"
+pat="\${*: -1}"
+if [ -f "\$STUB_DIR/alive_patterns" ] && grep -qxF -- "\$pat" "\$STUB_DIR/alive_patterns" 2>/dev/null; then
+  echo 99999
+  exit 0
+fi
+exit 1
+STUB
+  chmod +x "$stub_bin/pgrep"
 }
 
 # 共通の実行ラッパー: DOCK_JSON/STATE_DIRをテスト専用の使い捨てにし、待ち時間を0にする。
@@ -203,10 +216,22 @@ run_guard() {
     bash "$TARGET"
 }
 
+# commandフィールドを持つ3コントロール構成。実dock.jsonと同じ3ペイン構成を
+# 模しつつ、パスは偽物（プロセス生存チェックのbasename抽出だけ検証すればよい）。
 make_dock_json() {
   cat > "$1" <<'EOF'
-{"controls":[{"id":"usage","title":"Usage"},{"id":"next","title":"Next"},{"id":"system","title":"System"}]}
+{"controls":[
+  {"id":"usage","title":"Usage","command":"$HOME/fake/usage-watch.sh"},
+  {"id":"next","title":"Next","command":"$HOME/fake/next-watch.sh"},
+  {"id":"system","title":"System","command":"$HOME/fake/system-watch.sh"}
+]}
 EOF
+}
+
+# 3コントロール全部のプロセスが生きていることにする（title側だけを変化させる
+# テストで、プロセス判定の方はデフォルトで通しておくためのヘルパー）。
+set_all_processes_alive() {
+  printf 'usage-watch.sh\nnext-watch.sh\nsystem-watch.sh\n' > "$1/alive_patterns"
 }
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/cmux-dock-guard-test.XXXXXX")" || { echo "FATAL: mktemp -d に失敗しました" >&2; exit 1; }
@@ -224,13 +249,13 @@ echo "=== (a) cmuxが起動していない場合は何もせず終了する ==="
   rc=$?
   assert_eq "exit 0で終了する" "0" "$rc"
   assert_true "マーカーファイルは作られない" "$([ ! -f "$STATE_DIR/last-evaluated-instance" ] && echo 1 || echo 0)"
-  # app_pidも置いていないため、pgrepの時点でcmux.appプロセスが見つからず、
+  # app_pidも置いていないため、psの時点でcmux.appプロセスが見つからず、
   # cmux CLI（ソケット通信）には一切触れずに終了するのが期待動作。
   assert_true "cmuxへは一度も呼び出しが走らない" \
     "$([ ! -f "$STUB_DIR/calls.log" ] && echo 1 || echo 0)"
 }
 
-echo "=== (b) 健全なDockはそのまま（修復もマーカー以外の状態変化もしない） ==="
+echo "=== (b) 健全なDock（title一致＋プロセス生存）はそのまま ==="
 {
   STUB_BIN="$WORKDIR/b/bin"; STUB_DIR="$WORKDIR/b/stub"; STATE_DIR="$WORKDIR/b/state"; DOCK_JSON="$WORKDIR/b/dock.json"
   mkdir -p "$STUB_DIR"
@@ -240,12 +265,12 @@ echo "=== (b) 健全なDockはそのまま（修復もマーカー以外の状�
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/observed_titles"
+  set_all_processes_alive "$STUB_DIR"
 
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
   rc=$?
   assert_eq "exit 0で終了する" "0" "$rc"
   assert_true "マーカーファイルが書かれる" "$([ -f "$STATE_DIR/last-evaluated-instance" ] && echo 1 || echo 0)"
-  assert_true "reload-configは呼ばれない" "$(! grep -q 'reload-config' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
   assert_true "new-windowは呼ばれない" "$(! grep -q 'new-window' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
   assert_true "ログに『1回目判定で健全』が記録される" \
     "$(grep -q '1回目判定で健全' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
@@ -265,18 +290,20 @@ echo "=== (c) 1回目劣化・2回目健全（誤検知）は修復しない ===
   printf 'Usage\nNext\nTerminal\n' > "$STUB_DIR/observed_titles"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/healthy_titles"
   touch "$STUB_DIR/self_heals_after_first_check"
+  set_all_processes_alive "$STUB_DIR"
 
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
   rc=$?
   assert_eq "exit 0で終了する" "0" "$rc"
-  assert_true "reload-configは呼ばれない(誤検知として扱われ修復しない)" \
-    "$(! grep -q 'reload-config' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
   assert_true "new-windowは呼ばれない" "$(! grep -q 'new-window' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
   assert_true "ログに『2回目判定で健全（誤検知として扱い』が記録される" \
     "$(grep -q '2回目判定で健全（誤検知として扱い' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
 }
 
-echo "=== (d) 2回連続で劣化 -> reload-configで直る場合 ==="
+echo "=== (d) title一致でもプロセスが死んでいれば劣化として修復する ==="
+# リーダー実測(2026-08-07): Dockコマンドのプロセスをkillした直後・cmux再起動を
+# 挟まない場合、サーフェスのtitleは古い値のまま変化しない。title判定だけでは
+# この状態を健全と誤判定してしまうため、プロセス生存判定を独立の軸として持つ。
 {
   STUB_BIN="$WORKDIR/d/bin"; STUB_DIR="$WORKDIR/d/stub"; STATE_DIR="$WORKDIR/d/state"; DOCK_JSON="$WORKDIR/d/dock.json"
   mkdir -p "$STUB_DIR"
@@ -285,21 +312,27 @@ echo "=== (d) 2回連続で劣化 -> reload-configで直る場合 ==="
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
-  printf 'Usage\nNext\nTerminal\n' > "$STUB_DIR/observed_titles"
+  # titleは3つとも正しいまま(!)なのに、usage-watch.shのプロセスだけ死んでいる。
+  printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/observed_titles"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/healthy_titles"
-  touch "$STUB_DIR/reload_fixes"
+  printf 'next-watch.sh\nsystem-watch.sh\n' > "$STUB_DIR/alive_patterns"
+  printf 'usage-watch.sh\nnext-watch.sh\nsystem-watch.sh\n' > "$STUB_DIR/healthy_alive_patterns"
+  touch "$STUB_DIR/newwin_revives_processes"
+  printf 'WIN1\t0\n' > "$STUB_DIR/windows.tsv"
+  printf 'WS1\tWIN1\n' > "$STUB_DIR/ws_owner.tsv"
 
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
   rc=$?
   assert_eq "exit 0で終了する" "0" "$rc"
-  assert_true "reload-configが呼ばれる" "$(grep -q '^cmux reload-config$' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
-  assert_true "new-windowは呼ばれない（reload-configで直ったため）" \
-    "$(! grep -q 'new-window' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
-  assert_true "ログに『reload-configで復旧』が記録される" \
-    "$(grep -q 'reload-configで復旧' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
+  assert_true "titleが全部正しくてもnew-window修復が発動する" \
+    "$(grep -q '^cmux new-window$' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
+  assert_true "ログに『new-window方式で復旧』が記録される" \
+    "$(grep -q 'new-window方式で復旧' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
 }
 
-echo "=== (e) 2回連続で劣化 -> reload-configで直らずnew-window方式にフォールバック ==="
+echo "=== (e) Dockペインが存在しない(タイトルが全く現れない)場合も修復対象 ==="
+# 本人決定(2026-08-07): Usage/Next/Systemは常設インフラ扱い。セッション中に
+# 手動で閉じられていても、cmux再起動時のチェックでは必ず復活させる。
 {
   STUB_BIN="$WORKDIR/e/bin"; STUB_DIR="$WORKDIR/e/stub"; STATE_DIR="$WORKDIR/e/state"; DOCK_JSON="$WORKDIR/e/dock.json"
   mkdir -p "$STUB_DIR"
@@ -308,10 +341,37 @@ echo "=== (e) 2回連続で劣化 -> reload-configで直らずnew-window方式�
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
+  # Systemペイン自体が存在しない(タイトル一覧に無い。"Terminal"にすり替わる
+  # のではなく、そもそも観測されない)。
+  printf 'Usage\nNext\n' > "$STUB_DIR/observed_titles"
+  printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/healthy_titles"
+  touch "$STUB_DIR/newwin_reseeds"
+  set_all_processes_alive "$STUB_DIR"
+  printf 'WIN1\t0\n' > "$STUB_DIR/windows.tsv"
+  printf 'WS1\tWIN1\n' > "$STUB_DIR/ws_owner.tsv"
+
+  run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
+  rc=$?
+  assert_eq "exit 0で終了する" "0" "$rc"
+  assert_true "存在しないSystemペインもnew-window修復の対象になる" \
+    "$(grep -q '^cmux new-window$' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
+  assert_true "ログに『new-window方式で復旧』が記録される" \
+    "$(grep -q 'new-window方式で復旧' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
+}
+
+echo "=== (f) 2回連続で劣化 -> new-window方式で修復（複数ウィンドウ・複数ワークスペース） ==="
+{
+  STUB_BIN="$WORKDIR/f/bin"; STUB_DIR="$WORKDIR/f/stub"; STATE_DIR="$WORKDIR/f/state"; DOCK_JSON="$WORKDIR/f/dock.json"
+  mkdir -p "$STUB_DIR"
+  setup_stub_bin "$STUB_BIN" "$STUB_DIR"
+  make_dock_json "$DOCK_JSON"
+  touch "$STUB_DIR/cmux_up"
+  echo "4242" > "$STUB_DIR/app_pid"
+  echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
   printf 'Usage\nNext\nTerminal\n' > "$STUB_DIR/observed_titles"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/healthy_titles"
-  # reload_fixesは置かない(効かない) / newwin_reseedsを置く(new-windowで直る)
   touch "$STUB_DIR/newwin_reseeds"
+  set_all_processes_alive "$STUB_DIR"
   # 旧ウィンドウ2枚・ワークスペース計3個の複数窓構成を用意
   printf 'WIN1\t0\nWIN2\t1\n' > "$STUB_DIR/windows.tsv"
   printf 'WS1\tWIN1\nWS2\tWIN1\nWS3\tWIN2\n' > "$STUB_DIR/ws_owner.tsv"
@@ -319,7 +379,6 @@ echo "=== (e) 2回連続で劣化 -> reload-configで直らずnew-window方式�
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
   rc=$?
   assert_eq "exit 0で終了する" "0" "$rc"
-  assert_true "reload-configも試される" "$(grep -q '^cmux reload-config$' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
   assert_true "new-windowが呼ばれる" "$(grep -q '^cmux new-window$' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
   assert_eq "全3ワークスペースがmove-workspace-to-windowされる" "3" \
     "$(grep -c 'move-workspace-to-window' "$STUB_DIR/calls.log")"
@@ -333,9 +392,9 @@ echo "=== (e) 2回連続で劣化 -> reload-configで直らずnew-window方式�
     "$(grep -q 'new-window方式で復旧' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
 }
 
-echo "=== (f) 2回連続で劣化 -> どちらの修復でも直らない場合はERRORログのみで暴走しない ==="
+echo "=== (g) 2回連続で劣化 -> new-windowでも直らない場合はERRORログのみで暴走しない ==="
 {
-  STUB_BIN="$WORKDIR/f/bin"; STUB_DIR="$WORKDIR/f/stub"; STATE_DIR="$WORKDIR/f/state"; DOCK_JSON="$WORKDIR/f/dock.json"
+  STUB_BIN="$WORKDIR/g/bin"; STUB_DIR="$WORKDIR/g/stub"; STATE_DIR="$WORKDIR/g/state"; DOCK_JSON="$WORKDIR/g/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
   make_dock_json "$DOCK_JSON"
@@ -344,9 +403,11 @@ echo "=== (f) 2回連続で劣化 -> どちらの修復でも直らない場合�
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
   printf 'Usage\nNext\nTerminal\n' > "$STUB_DIR/observed_titles"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/healthy_titles"
+  set_all_processes_alive "$STUB_DIR"
   printf 'WIN1\t0\n' > "$STUB_DIR/windows.tsv"
   printf 'WS1\tWIN1\n' > "$STUB_DIR/ws_owner.tsv"
-  # reload_fixesもnewwin_reseedsも置かない = どちらも効かない
+  # newwin_reseedsを置かない = new-windowで作られた新ウィンドウもdock.json通り
+  # には再シードされない(=修復失敗)ケース
 
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
   rc=$?
@@ -357,9 +418,9 @@ echo "=== (f) 2回連続で劣化 -> どちらの修復でも直らない場合�
     "$([ -f "$STATE_DIR/last-evaluated-instance" ] && echo 1 || echo 0)"
 }
 
-echo "=== (g) 同一インスタンスへの2回目呼び出しは何もしない(WatchPaths多重発火対策) ==="
+echo "=== (h) 同一インスタンスへの2回目呼び出しは何もしない(WatchPaths多重発火対策) ==="
 {
-  STUB_BIN="$WORKDIR/g/bin"; STUB_DIR="$WORKDIR/g/stub"; STATE_DIR="$WORKDIR/g/state"; DOCK_JSON="$WORKDIR/g/dock.json"
+  STUB_BIN="$WORKDIR/h/bin"; STUB_DIR="$WORKDIR/h/stub"; STATE_DIR="$WORKDIR/h/state"; DOCK_JSON="$WORKDIR/h/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
   make_dock_json "$DOCK_JSON"
@@ -367,6 +428,7 @@ echo "=== (g) 同一インスタンスへの2回目呼び出しは何もしな�
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/observed_titles"
+  set_all_processes_alive "$STUB_DIR"
 
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" >/dev/null
   calls_after_first="$(wc -l < "$STUB_DIR/calls.log" | tr -d ' ')"
@@ -378,9 +440,9 @@ echo "=== (g) 同一インスタンスへの2回目呼び出しは何もしな�
     "$calls_after_first" "$calls_after_second"
 }
 
-echo "=== (h) 新しいcmux起動インスタンス(PID+起動時刻が変わる)は改めて判定する ==="
+echo "=== (i) 新しいcmux起動インスタンス(PID+起動時刻が変わる)は改めて判定する ==="
 {
-  STUB_BIN="$WORKDIR/h/bin"; STUB_DIR="$WORKDIR/h/stub"; STATE_DIR="$WORKDIR/h/state"; DOCK_JSON="$WORKDIR/h/dock.json"
+  STUB_BIN="$WORKDIR/i/bin"; STUB_DIR="$WORKDIR/i/stub"; STATE_DIR="$WORKDIR/i/state"; DOCK_JSON="$WORKDIR/i/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
   make_dock_json "$DOCK_JSON"
@@ -388,6 +450,7 @@ echo "=== (h) 新しいcmux起動インスタンス(PID+起動時刻が変わる
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/observed_titles"
+  set_all_processes_alive "$STUB_DIR"
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" >/dev/null
   marker_first="$(cat "$STATE_DIR/last-evaluated-instance")"
 
@@ -404,9 +467,9 @@ echo "=== (h) 新しいcmux起動インスタンス(PID+起動時刻が変わる
     "$([ "$(grep -c 'start: instance=' "$STATE_DIR/guard.log")" = "2" ] && echo 1 || echo 0)"
 }
 
-echo "=== (i) dock.jsonが読めない場合は判定不能として何もしない ==="
+echo "=== (j) dock.jsonが読めない場合は判定不能として何もしない ==="
 {
-  STUB_BIN="$WORKDIR/i/bin"; STUB_DIR="$WORKDIR/i/stub"; STATE_DIR="$WORKDIR/i/state"; DOCK_JSON="$WORKDIR/i/dock.json"
+  STUB_BIN="$WORKDIR/j/bin"; STUB_DIR="$WORKDIR/j/stub"; STATE_DIR="$WORKDIR/j/state"; DOCK_JSON="$WORKDIR/j/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
   # DOCK_JSONをあえて作らない
@@ -418,14 +481,14 @@ echo "=== (i) dock.jsonが読めない場合は判定不能として何もしな
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" >/dev/null
   rc=$?
   assert_eq "exit 0で終了する" "0" "$rc"
-  assert_true "修復は試みない" "$(! grep -q 'reload-config\|new-window' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
+  assert_true "修復は試みない" "$(! grep -q 'new-window' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
   assert_true "WARNログが記録される" \
     "$(grep -q 'dock.jsonからtitleを取得できません' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
 }
 
-echo "=== (j) ロック中は多重実行しない ==="
+echo "=== (k) ロック中は多重実行しない ==="
 {
-  STUB_BIN="$WORKDIR/j/bin"; STUB_DIR="$WORKDIR/j/stub"; STATE_DIR="$WORKDIR/j/state"; DOCK_JSON="$WORKDIR/j/dock.json"
+  STUB_BIN="$WORKDIR/k/bin"; STUB_DIR="$WORKDIR/k/stub"; STATE_DIR="$WORKDIR/k/state"; DOCK_JSON="$WORKDIR/k/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
   make_dock_json "$DOCK_JSON"
@@ -433,6 +496,7 @@ echo "=== (j) ロック中は多重実行しない ==="
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
   printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/observed_titles"
+  set_all_processes_alive "$STUB_DIR"
   mkdir -p "$STATE_DIR/lock"
 
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" >/dev/null

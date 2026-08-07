@@ -8,9 +8,16 @@
 # 呼ばれる想定の1回実行スクリプト。常駐ループは持たない。
 #
 # 流れ: cmux起動確認 -> settle待ち -> 健全性判定(2回・間隔あり、誤検知防御)
-#       -> 劣化時のみ修復(reload-config -> だめならnew-window方式) -> ログ記録
+#       -> 劣化時のみnew-window方式で修復 -> ログ記録
+# 健全性判定はtitle一致とプロセス生存の両方を見る（リーダー実測2026-08-07:
+# Dockコマンドをkillした直後・cmux再起動を挟まない場合はtitleが古い値のまま
+# 変化しないため、titleだけでは検知できない）。`cmux reload-config`による
+# 再シードは同日の実機実験で「効かない」と確定したため修復手段には含めない。
 # 修復は「cmux起動インスタンスごとに最大1回」（PID+起動時刻マーカー）に制限し、
 # WatchPaths の多重発火や暴走を防ぐ。通知は出さない（📣は本人呼び出し専用運用）。
+# 本ガードはcmux起動時に1回だけ評価する設計のため、起動後にDockペインを本人が
+# 手動で閉じてもそのセッション中は再介入しない（次にcmuxを再起動した時に、
+# その時点でのDock状態を評価してUsage/Next/Systemを常設インフラとして復元する）。
 #
 # bash 3.2 互換（macOS標準bash）。連想配列・mapfileは使わない。
 
@@ -87,9 +94,53 @@ observed_global_titles() {
     | jq -r '.. | objects | select(.dock_scope? == "global" and (.title? != null)) | .title' 2>/dev/null
 }
 
-# dock_healthy: dock.json の各controlのtitleが、いずれかの [dock:global]
-# サーフェスのtitleとして観測できていれば健全とみなす。dock.jsonが読めない/
-# controlsが空の場合は「判定不能」を安全側（健全扱い＝何もしない）に倒す。
+# expected_process_patterns: dock.json の各terminal controlのcommandから、
+# 先頭トークン（実行ファイルパス）のbasenameを1行ずつ返す。$HOMEだけ安全に
+# 展開する（evalはしない＝任意コマンド実行を避ける）。browser control（type
+# が"browser"）はプロセスを持たないので対象外。
+expected_process_patterns() {
+  [ -f "$DOCK_JSON" ] || return
+  jq -r '.controls[]? | select((.type // "terminal") == "terminal") | .command // empty' "$DOCK_JSON" 2>/dev/null \
+    | while IFS= read -r cmdline; do
+        [ -z "$cmdline" ] && continue
+        expanded="${cmdline//\$HOME/$HOME}"
+        expanded="${expanded//\${HOME\}/$HOME}"
+        first="${expanded%% *}"
+        [ -z "$first" ] && continue
+        basename "$first"
+      done
+}
+
+# dock_processes_alive: dock.jsonの各terminal controlのcommandに対応する
+# プロセスが実際に生きているかを確認する。titleとは独立した第2の判定軸
+# （リーダー実測2026-08-07: Dockコマンドプロセスをkillした直後・cmux再起動を
+# 挟まない場合、サーフェスのtitleは古い値「Usage」等のまま変化しない＝
+# titleだけでは降格を検知できない）。expected_process_patternsが空（=判定
+# 不能）の場合は安全側で健全扱いにする。
+dock_processes_alive() {
+  local patterns pat missing
+  patterns="$(expected_process_patterns)"
+  [ -z "$patterns" ] && return 0
+  missing=0
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    pgrep -f -- "$pat" >/dev/null 2>&1 || missing=1
+  done <<EOF
+$patterns
+EOF
+  [ "$missing" = "0" ]
+}
+
+# dock_healthy: 次の両方が揃って初めて健全とみなす。
+#   1. title判定: dock.jsonの各controlのtitleが、いずれかの[dock:global]
+#      サーフェスのtitleとして観測できる（ペインが無い＝閉じられている場合も
+#      当然不一致になり劣化として扱われる。本人決定2026-08-07: Usage/Next/
+#      Systemは常設インフラ扱いで、セッション中に手動で閉じられていても
+#      cmux再起動時には必ず復活させる）。
+#   2. プロセス判定（dock_processes_alive）: 対応するプロセスが実際に生きて
+#      いる。titleだけでは拾えない「セッション継続中の降格」を拾うため。
+# dock.jsonが読めない/controlsが空の場合は「判定不能」を安全側（健全扱い＝
+# 何もしない）に倒す。
 dock_healthy() {
   local expected observed t missing
   expected="$(expected_titles)"
@@ -107,17 +158,8 @@ dock_healthy() {
   done <<EOF
 $expected
 EOF
-  [ "$missing" = "0" ]
-}
-
-# repair_reload_config: `cmux reload-config`（= `cmux config reload`）を試す。
-# dock.md: 「Explicitly reloading the Dock config still replaces the current
-# Dock with the config contents.」— 明示リロードがDockをconfig内容へ置き換える
-# 旨の記述はあるが、reload-configが劣化したDockを再シードできるかは未確認
-# （このツールは直後に再判定して自己検証するので、効かなくても安全）。
-repair_reload_config() {
-  log "repair: cmux reload-config を試行"
-  "$CMUX_BIN" reload-config >/dev/null 2>&1
+  [ "$missing" != "0" ] && return 1
+  dock_processes_alive
 }
 
 # repair_new_window: リーダー実績の手順（2026-08-06/08-07）をスクリプト化。
@@ -262,17 +304,8 @@ main() {
     exit 0
   fi
 
-  log "degraded: 2回連続で劣化を確認。修復を開始します"
+  log "degraded: 2回連続で劣化を確認。new-window方式で修復を開始します"
 
-  repair_reload_config
-  sleep "$POST_REPAIR_SECS"
-  if dock_healthy; then
-    log "repaired: reload-configで復旧しました"
-    printf '%s' "$instance" > "$MARKER_FILE"
-    exit 0
-  fi
-
-  log "reload-configでは復旧しませんでした。new-window方式にフォールバックします"
   repair_new_window
   sleep "$POST_REPAIR_SECS"
   if dock_healthy; then
