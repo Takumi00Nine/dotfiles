@@ -22,9 +22,20 @@ link() {  # link <repo-relative-source> <destination>
     return
   fi
   mkdir -p "$(dirname "$dest")"
-  # Back up a pre-existing real file (not a symlink) once.
+  # Back up a pre-existing real file OR directory (not a symlink) once, then move it
+  # out of the way. Uses `mv` (not `cp`) so the destination path is actually freed:
+  # for a directory, `ln -sfn` cannot replace it in place (unlink() fails on a
+  # non-empty directory), so a `cp`-then-leave-original-behind approach silently
+  # fails to link (Codexレビュー2026-08-05指摘 — 2巡目でcp -Rだけでは不十分と判明)。
+  # If a backup already exists, stop rather than silently overwriting/merging it.
   if [ -e "$dest" ] && [ ! -L "$dest" ]; then
-    cp "$dest" "$dest.pre-dotfiles.bak"
+    # `-e` alone misses a broken symlink at the backup path (Codexレビュー2026-08-05
+    # 指摘・3巡目); `-L` also catches that case.
+    if [ -e "$dest.pre-dotfiles.bak" ] || [ -L "$dest.pre-dotfiles.bak" ]; then
+      echo "error: backup already exists, refusing to overwrite: $dest.pre-dotfiles.bak" >&2
+      return 1
+    fi
+    mv "$dest" "$dest.pre-dotfiles.bak"
     echo "backed up: $dest -> $dest.pre-dotfiles.bak"
   fi
   ln -sfn "$src" "$dest"
@@ -149,6 +160,7 @@ append_zsh_aliases_source() {
 }
 
 link hammerspoon/init.lua        "$HOME/.hammerspoon/init.lua"
+link hammerspoon/nape_pro        "$HOME/.hammerspoon/nape_pro"
 link tmux/tmux.conf              "$HOME/.tmux.conf"
 link ghostty/config              "$HOME/.config/ghostty/config"
 link ghostty/start-tmux.sh           "$HOME/.config/ghostty/start-tmux.sh"

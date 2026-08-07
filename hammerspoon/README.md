@@ -4,6 +4,11 @@ Keychron マウスのボタン1つで「**YouTube動画の一時停止／再開 
 
 作成日: 2026-06-16 / 環境: macOS (Darwin 25.x, Apple Silicon)
 
+> **2026-08-05 追記**: Nape Pro トラックボール向けの本格キーマップ(01/02/M1/M2の4ボタン+ダイヤル+コンボ)を
+> `nape_pro/` サブモジュールとして追加した(Stage 1・セッション族除く)。F18のロジックは
+> `nape_pro/init.lua` の `micToggle()` へ移設・拡張済み(このファイル内の記述は互換のため残置)。
+> Launcher設定手順・設計判断・人間チェック台本は [`nape_pro/SETUP.md`](nape_pro/SETUP.md) 参照。
+
 ---
 
 ## やりたかったこと
