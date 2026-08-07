@@ -29,6 +29,10 @@ dotfiles/
 │   │   ├── cmux-next-watch.sh
 │   │   ├── README.md              Details for this pane
 │   │   └── tests/
+│   ├── cmux-dock-guard/           LaunchAgent: repairs a degraded Dock automatically after cmux relaunches
+│   │   ├── cmux-dock-guard.sh
+│   │   ├── README.md              Detection design, repair logic, env vars, known limitations
+│   │   └── tests/
 │   ├── layout-enforce.sh          One-shot pane-width enforcement (e.g. right after spawning a teammate)
 │   ├── lib-layout.sh              Shared pane-width logic (sourced by layout-enforce.sh / show-review.sh)
 │   └── show-review.sh             Shows a deliverable (Markdown/HTML/URL) in a review pane
@@ -43,8 +47,11 @@ dotfiles/
 │   │   ├── init.lua / logic.lua / cmux.lua / youtube.lua
 │   │   └── SETUP.md               Launcher hardware setup + design notes + human-check script
 │   └── tests/                     Plain-Lua unit + smoke tests (no hs.* dependency)
+├── launchagents/                  LaunchAgent plist templates (install.sh fills in __DOTFILES_HOME__)
+│   └── com.takumi009.cmux-dock-guard.plist.template
 ├── tests/                         Repo-level tests for install.sh behavior
-│   └── test-zsh-aliases-source.sh
+│   ├── test-zsh-aliases-source.sh
+│   └── test-cmux-dock-guard-launchagent.sh
 ├── tmux/
 │   └── tmux.conf                  prefix=Ctrl+a, directional splits, Shift+arrow movement, usage status bar, etc.
 ├── zsh/
@@ -72,9 +79,10 @@ Usage-tracking (`claude-cache.json`/`codex-cache.json`, the refresh LaunchAgent,
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
 | `cmux/cmux-next-watch/` | `~/work/tools/cmux-next-watch` | symlink (directory; `dock.json`'s "Next" pane points here) |
+| `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | generated (template with `__DOTFILES_HOME__` filled in) + `launchctl` (re)load, unless `SKIP_LAUNCHCTL=1` |
 | `zsh/aliases.zsh` | end of `~/.zshrc` | **idempotent append** of a source line, not a symlink (see below) |
 
-A few `cmux/` scripts are *not* symlinked individually: `claude-cmux-hooks.json`, `claude-teams-entry.sh`, `cmux-system-watch.sh`, `cmux-feed-watch.sh`, `layout-enforce.sh`, `lib-layout.sh`, `show-review.sh`. They're invoked directly from this repo's path (by `dock.json` commands, the `cct` alias's `--settings` flag, or `claude-teams-launch.sh`'s sibling-script resolution), which assumes the repo lives at `~/work/dotfiles`. `dock.json`'s Usage pane command points at `cmux-usage-watch.sh` in the separate `claude-codex-usage` repo instead (`~/work/claude-codex-usage/cmux-usage-watch.sh`) — that script and its LaunchAgent are not part of this repo.
+A few `cmux/` scripts are *not* symlinked individually: `claude-cmux-hooks.json`, `claude-teams-entry.sh`, `cmux-system-watch.sh`, `cmux-feed-watch.sh`, `layout-enforce.sh`, `lib-layout.sh`, `show-review.sh`, `cmux-dock-guard/cmux-dock-guard.sh`. They're invoked directly from this repo's path (by `dock.json` commands, the `cct` alias's `--settings` flag, `claude-teams-launch.sh`'s sibling-script resolution, or the `cmux-dock-guard` LaunchAgent's `ProgramArguments`), which assumes the repo lives at `~/work/dotfiles`. `dock.json`'s Usage pane command points at `cmux-usage-watch.sh` in the separate `claude-codex-usage` repo instead (`~/work/claude-codex-usage/cmux-usage-watch.sh`) — that script and its LaunchAgent are not part of this repo.
 
 ### zsh: append, not symlink
 `zsh/aliases.zsh` defines `cc`/`cct`. Instead of symlinking a whole `.zshrc` (which would clobber machine-specific setup like `anyenv`/`compinit`), `install.sh` idempotently appends a single marked source line (`# dotfiles-managed`) to the end of `~/.zshrc`. Existing `~/.zshrc` content is never modified or reordered, and re-running `install.sh` does not duplicate the line.
@@ -94,6 +102,7 @@ Apply changes:
 - Hammerspoon: menu bar hammer icon -> Reload Config
 - Ghostty: `Cmd+Shift+,` (or restart)
 - zsh: `cc`/`cct` source line added to `~/.zshrc` if missing (restart the shell, or `source ~/.zshrc`)
+- cmux Dock guard: LaunchAgent (re)loaded automatically by `install.sh` (set `SKIP_LAUNCHCTL=1` to only generate the plist without touching `launchctl`, e.g. for testing)
 - Usage stats (Claude/Codex usage bars, refresh LaunchAgent): install separately from the [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo's own `install.sh`
 
 ---
@@ -116,7 +125,7 @@ Hammerspoon configuration for controlling AI terminals with Keychron mouse butto
 - Ghostty does not support end-of-line comments (write comments on their own lines)
 
 ### cmux/
-Integration with the [`cmux`](https://cmux.io) terminal: notification filtering (`cmux.json`), three Dock status panes (Usage/Next/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Next pane's project/external-brain display. The Usage pane's rendering script and its refresh LaunchAgent live in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo.
+Integration with the [`cmux`](https://cmux.io) terminal: notification filtering (`cmux.json`), three Dock status panes (Usage/Next/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Next pane's project/external-brain display. The Usage pane's rendering script and its refresh LaunchAgent live in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo. See [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) for the LaunchAgent that automatically repairs a degraded Dock after cmux relaunches.
 
 ### zsh/
 `cc` (`cd ~/Claude && claude`) and `cct` (`cd ~/Claude && cmux claude-teams ...`, with cmux notification-hook and `--teammate-mode in-process` injection unless the caller already passed one of those flags). See [zsh: append, not symlink](#zsh-append-not-symlink) above for how it gets wired into `~/.zshrc`.
@@ -127,7 +136,9 @@ Integration with the [`cmux`](https://cmux.io) terminal: notification filtering 
 
 ```sh
 bash tests/test-zsh-aliases-source.sh
+bash tests/test-cmux-dock-guard-launchagent.sh
 bash cmux/cmux-next-watch/tests/test-cmux-next-watch.sh
+bash cmux/cmux-dock-guard/tests/test-cmux-dock-guard.sh
 
 # Hammerspoon logic tests run under a plain Lua interpreter (no hs.* dependency);
 # any Lua 5.x works, e.g. via anyenv: anyenv install luaenv && luaenv install 5.4.8
@@ -171,6 +182,10 @@ dotfiles/
 │   │   ├── cmux-next-watch.sh
 │   │   ├── README.md              このペインの詳細
 │   │   └── tests/
+│   ├── cmux-dock-guard/           LaunchAgent: cmux再起動後に劣化したDockを自動修復
+│   │   ├── cmux-dock-guard.sh
+│   │   ├── README.md              検知方式・修復ロジック・環境変数・既知の制約
+│   │   └── tests/
 │   ├── layout-enforce.sh          ペイン幅の単発矯正（チームメイト起動直後等）
 │   ├── lib-layout.sh              ペイン幅ロジック共通部（layout-enforce.sh / show-review.shからsource）
 │   └── show-review.sh             成果物（Markdown/HTML/URL）をレビュー用ペインに表示
@@ -185,8 +200,11 @@ dotfiles/
 │   │   ├── init.lua / logic.lua / cmux.lua / youtube.lua
 │   │   └── SETUP.md               Launcherハード設定手順＋設計判断＋人間チェック台本
 │   └── tests/                     素のLuaで動く単体・スモークテスト（hs.*非依存）
+├── launchagents/                  LaunchAgent plistテンプレート（install.shが__DOTFILES_HOME__を実HOMEへ展開）
+│   └── com.takumi009.cmux-dock-guard.plist.template
 ├── tests/                         install.shの挙動に対するリポジトリレベルのテスト
-│   └── test-zsh-aliases-source.sh
+│   ├── test-zsh-aliases-source.sh
+│   └── test-cmux-dock-guard-launchagent.sh
 ├── tmux/
 │   └── tmux.conf                  prefix=Ctrl+a, 方向分割, Shift+矢印移動, 使用率ステータスバー 等
 ├── zsh/
@@ -214,9 +232,10 @@ dotfiles/
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
 | `cmux/cmux-next-watch/` | `~/work/tools/cmux-next-watch` | symlink（ディレクトリ。`dock.json`の「Next」ペインがこのパスを参照）|
+| `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | 生成（`__DOTFILES_HOME__`をテンプレート展開）＋`launchctl`で(再)登録。`SKIP_LAUNCHCTL=1`で登録のみskip |
 | `zsh/aliases.zsh` | `~/.zshrc` 末尾 | **冪等追記**（symlinkではない。後述）|
 
-`cmux/` の一部スクリプト（`claude-cmux-hooks.json`・`claude-teams-entry.sh`・`cmux-system-watch.sh`・`cmux-feed-watch.sh`・`layout-enforce.sh`・`lib-layout.sh`・`show-review.sh`）は個別にsymlinkされない。`dock.json`のコマンド・`cct`エイリアスの`--settings`・`claude-teams-launch.sh`の隣接スクリプト解決から、リポジトリのパス（`~/work/dotfiles`に置かれている前提）を直接参照して使われる。`dock.json`のUsageペインのcommandは別リポジトリ`claude-codex-usage`側の`cmux-usage-watch.sh`（`~/work/claude-codex-usage/cmux-usage-watch.sh`）を指しており、そのスクリプトと対応するLaunchAgentは本リポジトリには含まれない。
+`cmux/` の一部スクリプト（`claude-cmux-hooks.json`・`claude-teams-entry.sh`・`cmux-system-watch.sh`・`cmux-feed-watch.sh`・`layout-enforce.sh`・`lib-layout.sh`・`show-review.sh`・`cmux-dock-guard/cmux-dock-guard.sh`）は個別にsymlinkされない。`dock.json`のコマンド・`cct`エイリアスの`--settings`・`claude-teams-launch.sh`の隣接スクリプト解決・`cmux-dock-guard` LaunchAgentの`ProgramArguments`から、リポジトリのパス（`~/work/dotfiles`に置かれている前提）を直接参照して使われる。`dock.json`のUsageペインのcommandは別リポジトリ`claude-codex-usage`側の`cmux-usage-watch.sh`（`~/work/claude-codex-usage/cmux-usage-watch.sh`）を指しており、そのスクリプトと対応するLaunchAgentは本リポジトリには含まれない。
 
 ### zsh: symlinkではなく追記
 `zsh/aliases.zsh` は `cc`/`cct` を定義する。`.zshrc` 全体をsymlinkすると `anyenv`/`compinit` 等マシン固有の設定を壊すため、`install.sh` は目印コメント（`# dotfiles-managed`）付きのsource行1行だけを `~/.zshrc` 末尾へ冪等に追記する。既存の `~/.zshrc` 内容は一切変更・並べ替えせず、再実行しても二重追記しない。
@@ -236,6 +255,7 @@ cd ~/work/dotfiles
 - Hammerspoon: メニューバー 🔨 → Reload Config
 - Ghostty: `Cmd+Shift+,`（または再起動）
 - zsh: `cc`/`cct` のsource行が無ければ `~/.zshrc` に追記済み（シェル再起動、または `source ~/.zshrc`）
+- cmux Dock guard: LaunchAgentは`install.sh`が自動で(再)登録（`SKIP_LAUNCHCTL=1`でplist生成のみ・登録skip。テスト用）
 - 使用率まわり（Claude/Codex使用率バー・refresh用LaunchAgent）: 別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 自身の `install.sh` で別途導入
 
 ---
@@ -258,7 +278,7 @@ Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。
 - ※ Ghostty は行末コメント非対応（コメントは独立行に書く）
 
 ### cmux/
-[`cmux`](https://cmux.io) ターミナルとの統合。通知フィルタ（`cmux.json`）、3つのDockステータスペイン（Usage/Next/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Nextペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプトと対応するrefresh用LaunchAgentは別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側にある。
+[`cmux`](https://cmux.io) ターミナルとの統合。通知フィルタ（`cmux.json`）、3つのDockステータスペイン（Usage/Next/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Nextペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプトと対応するrefresh用LaunchAgentは別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側にある。cmux再起動後にDockが壊れたままにならないよう自動修復するLaunchAgentの詳細は [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) 参照。
 
 ### zsh/
 `cc`（`cd ~/Claude && claude`）と `cct`（`cd ~/Claude && cmux claude-teams ...`。呼び出し側が該当フラグを渡していなければcmux通知フックと`--teammate-mode in-process`を注入）を定義。`~/.zshrc` への配線方式は上の[「zsh: symlinkではなく追記」](#zsh-symlinkではなく追記)参照。
@@ -269,7 +289,9 @@ Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。
 
 ```sh
 bash tests/test-zsh-aliases-source.sh
+bash tests/test-cmux-dock-guard-launchagent.sh
 bash cmux/cmux-next-watch/tests/test-cmux-next-watch.sh
+bash cmux/cmux-dock-guard/tests/test-cmux-dock-guard.sh
 
 # Hammerspoonのロジックテストは素のLuaインタプリタで動く（hs.*非依存）。
 # Lua 5.x であればよい（例: anyenv経由 anyenv install luaenv && luaenv install 5.4.8）

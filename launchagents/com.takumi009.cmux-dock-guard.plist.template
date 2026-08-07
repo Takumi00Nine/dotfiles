@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: install.sh replaces __DOTFILES_HOME__ with the real $HOME at
+     install time and writes the result to ~/Library/LaunchAgents. Paths here
+     must not be hardcoded to any one user's home directory (that broke
+     install on machines with a different username, see
+     com.takumi009.usage-refresh.plist.template history). -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.takumi009.cmux-dock-guard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__DOTFILES_HOME__/work/dotfiles/cmux/cmux-dock-guard/cmux-dock-guard.sh</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+    <!-- cmuxのソケット/ロックファイルが入るディレクトリ。cmux再起動のたびに
+         ファイルが unlink+再作成されるため、その特定ファイルではなくこの
+         ディレクトリ自体をWatchPathsの対象にする（launchdはWatchPathsに
+         指定したパス自体が消えると監視を外し、再作成されても復活しない仕様
+         のため。ディレクトリなら中身の増減で発火するのでこの問題を回避できる）。 -->
+    <key>WatchPaths</key>
+    <array>
+        <string>__DOTFILES_HOME__/.local/state/cmux</string>
+    </array>
+    <!-- WatchPathsの取りこぼし対策の安全網。cmux-dock-guard.sh自身が
+         「cmux起動インスタンスごとに最大1回」しか判定・修復しないので、
+         この間隔で無駄撃ちしても実害はない。 -->
+    <key>StartInterval</key>
+    <integer>60</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__DOTFILES_HOME__/.local/state/cmux-dock-guard/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__DOTFILES_HOME__/.local/state/cmux-dock-guard/launchd.log</string>
+</dict>
+</plist>
