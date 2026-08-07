@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Template: install.sh replaces __DOTFILES_HOME__ with the real $HOME at
-     install time and writes the result to ~/Library/LaunchAgents. Paths here
-     must not be hardcoded to any one user's home directory (that broke
-     install on machines with a different username, see
-     com.takumi009.usage-refresh.plist.template history). -->
+<!-- Template: install.sh replaces __DOTFILES_HOME__ with the real $HOME and
+     __DOTFILES_DIR__ with this repo's actual checkout path at install time,
+     then writes the result to ~/Library/LaunchAgents. Paths here must not be
+     hardcoded to any one user's home directory (that broke install on
+     machines with a different username, see
+     com.takumi009.usage-refresh.plist.template history) or to the
+     ~/work/dotfiles convention (a clone elsewhere would otherwise point this
+     LaunchAgent at a script that doesn't exist, failing silently under
+     launchd — Opus 5 review, MINOR). -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>com.takumi009.cmux-dock-guard</string>
     <key>ProgramArguments</key>
     <array>
-        <string>__DOTFILES_HOME__/work/dotfiles/cmux/cmux-dock-guard/cmux-dock-guard.sh</string>
+        <string>__DOTFILES_DIR__/cmux/cmux-dock-guard/cmux-dock-guard.sh</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -29,9 +33,11 @@
     </array>
     <!-- WatchPathsの取りこぼし対策の安全網。cmux-dock-guard.sh自身が
          「cmux起動インスタンスごとに最大1回」しか判定・修復しないので、
-         この間隔で無駄撃ちしても実害はない。 -->
+         この間隔で無駄撃ちしても実害はない。目安60秒以内の復元要件に対して
+         安全網の間隔自体が穴にならないよう60→20秒に短縮（Opus 5レビュー
+         指摘・MAJOR）。 -->
     <key>StartInterval</key>
-    <integer>60</integer>
+    <integer>20</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>

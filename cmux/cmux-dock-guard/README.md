@@ -20,6 +20,11 @@ cmux 0.64系の仕様（[docs/dock.md](https://raw.githubusercontent.com/manaflo
 cmux-dock-guard はこれをLaunchAgentとして常駐監視し、劣化を検知したら自動で
 直す。
 
+`cmux reload-config`（明示的なDock config再読み込み）による再シードも検討
+したが、実機実験（2026-08-07・本人がDockコマンドプロセスをkill→リーダーが
+実測）で「劣化したDockは再シードされない」ことが確定したため、修復手段には
+含めていない（後述）。
+
 ## 起動検知
 
 cmuxのソケット/ロックファイルが入る `~/.local/state/cmux/` ディレクトリを
@@ -30,7 +35,7 @@ unlink+再作成されるが、**launchdはWatchPathsに指定したパスその
 ソケットファイル単体ではなく、それが入っている**ディレクトリ**を監視対象に
 している（ディレクトリ自体は消えないので、中身の増減で確実に発火する）。
 
-これに加えて`StartInterval`（60秒間隔）のポーリングを安全網として併用する
+これに加えて`StartInterval`（20秒間隔）のポーリングを安全網として併用する
 （WatchPathsの取りこぼし対策）。両経路とも同じスクリプトを呼び、スクリプト
 自身が「cmux起動インスタンスごとに最大1回」しか判定・修復しないため、
 安全網が余分に発火しても実害はない（後述）。
@@ -41,33 +46,34 @@ unlink+再作成されるが、**launchdはWatchPathsに指定したパスその
    識別する。見つからなければ（cmux未起動の通常状態）何もせず終了する。
 2. このインスタンスが判定済み（状態ファイルに記録済み）なら何もしない
    （WatchPathsの多重発火・StartIntervalの空振り対策）。
-3. `cmux ping`でソケットが応答するか確認する（appプロセスはあるが起動途中で
-   まだソケットが上がっていない場合は、マーカーを書かずに次回の発火に委ねる）。
-4. settle待ち（既定30秒）してから健全性を判定する。次の**両方**が揃って
+3. `cmux ping`でソケットが応答するか確認する。appプロセスはあるが起動途中で
+   まだソケットが上がっていない場合は、短く（既定2秒×10回）リトライしてから
+   諦める（次のStartInterval発火まで丸ごと待つと目安60秒の枠を圧迫するため）。
+4. settle待ち（既定12秒）してから健全性を判定する。次の**両方**が揃って
    初めて健全とみなす:
    - title判定: `dock.json`の各controlの`title`が、`cmux --json tree --all`
      が返す`dock_scope=="global"`なサーフェスのいずれかのtitleとして
      観測できる。ペインが存在しない（閉じられている）場合もここで不一致に
      なる。
-   - プロセス判定: `dock.json`の各controlの`command`（実行ファイルパスの
-     basenameを抽出）に対応するプロセスが`pgrep -f`で実際に見つかる。
-     リーダー実測（2026-08-07）: Dockコマンドのプロセスをkillした直後・
-     cmux再起動を挟まない場合、サーフェスのtitleは古い値のまま変化しない
-     （降格した対話シェルなのに表示は「Usage」のまま）。title判定だけでは
-     この状態を健全と誤判定してしまうため、独立した第2の軸として持つ。
-5. 劣化を検知したら、誤検知防御のため間隔（既定15秒）を空けてもう一度判定
+   - プロセス判定: `dock.json`の各terminal controlの`command`（実行ファイル
+     パスのbasenameを抽出）に対応するプロセスが`pgrep -f`で実際に見つかる。
+     実機実験（2026-08-07・本人kill→リーダー実測）: Dockコマンドの
+     プロセスをkillした直後・cmux再起動を挟まない場合、サーフェスのtitleは
+     古い値のまま変化しない（降格した対話シェルなのに表示は「Usage」の
+     まま）。title判定だけではこの状態を健全と誤判定してしまうため、独立
+     した第2の軸として持つ。`command`の実行ファイルが存在しない（`[ -x ]`
+     で見えない）controlはこの判定から除外する（後述）。
+5. 劣化を検知したら、誤検知防御のため間隔（既定6秒）を空けてもう一度判定
    する（起動直後は一時的に汎用タイトルになりうる観測があるため）。
 6. 2回連続で劣化を確認した場合のみ、新ウィンドウ方式で修復する: `cmux
    new-window`（スナップショットの無い新ウィンドウはdock.jsonから再シード
-   される）→ 既存の全ウィンドウの全ワークスペースを新ウィンドウへ
-   `move-workspace-to-window`で移動 → 旧ウィンドウを`close-window`で閉鎖
-   （旧ウィンドウ側にワークスペース移動の過程で自動生成される空
-   ワークスペースは、旧ウィンドウごと閉鎖されるので個別の移動・掃除は
-   不要）→ 新ウィンドウ側の初期空ワークスペースだけ`cmux workspace close`
-   で掃除（他に本物のワークスペースが無い退化ケースでは空にしないよう残す）。
-   （`cmux reload-config`による再シードは検討したが、実機実験（2026-08-07・
-   本人kill→リーダー実測）で劣化したDockを再シードしないことが確定した
-   ため、修復手段には含めていない。）
+   される）→ 各既存ウィンドウのワークスペースを新ウィンドウへ
+   `move-workspace-to-window`で移動 → そのウィンドウの移動が**全部成功
+   した場合だけ**`close-window`で閉鎖（1件でも失敗したウィンドウは閉鎖せず
+   残置し、ERRORログを残す。移動失敗を見逃して閉鎖すると、本人の作業中
+   ワークスペースがウィンドウごと消えるため）→ 新ウィンドウ側の初期空
+   ワークスペースだけ`cmux workspace close`で掃除（他に本物のワークスペース
+   が無い退化ケースでは空にしないよう残す）。
 7. 修復の成否によらず、このインスタンスへの再試行はしない（暴走防止。次に
    cmuxが再起動されるまで待つ）。**この設計の帰結として、cmux起動後に本人が
    Dockペインを手動で閉じても、そのセッション中はガードが再介入することは
@@ -75,18 +81,40 @@ unlink+再作成されるが、**launchdはWatchPathsに指定したパスその
    次にcmuxを起動した時点での評価に限る）。通知は出さない（📣は本人呼び出し
    専用運用のため）。
 
+## 安全対策（ハング・タイムアウト）
+
+- 個々の`cmux`呼び出しは`cmux_run`（`run_with_timeout`）でラップされ、既定
+  15秒でタイムアウトする。ソケット半死状態でcmuxがブロックしても、この
+  タイムアウトが発火してプロセスグループごと終了させる。
+- スクリプト全体にも既定300秒のウォッチドッグを仕込んでいる。launchdは
+  同一Labelのジョブを多重起動しない仕様のため、個々のcmux呼び出し以外の
+  場所で万一ハングすると、そのままでは以後WatchPaths/StartIntervalが永久に
+  発火しなくなる。ウォッチドッグはその最後の砦として自分自身にSIGTERMを
+  送る。
+- 実装中に、この種のタイムアウト/ウォッチドッグの複数統文サブシェル
+  （`sleep N; kill ...`）を`set -m`でプロセスグループ化せずに`kill`すると、
+  既にforkされた`sleep`孫プロセスだけ生き残ってPID1へ再親化し、コマンド
+  置換／パイプの出力先fdを握り続けたまま数十〜数百秒ブロックし続ける
+  不具合を実測した（親を殺しても孫は死なない、という典型的な罠）。cmd・
+  ウォッチャー双方をプロセスグループ化し、`kill -TERM "-$pid"`でグループ
+  ごと終了させることで解消している。
+
 ## 環境変数
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
 | `CMUX_DOCK_GUARD_CMUX_BIN` | `cmux` | 呼び出すcmux CLI（テスト用差し替え口） |
-| `CMUX_DOCK_GUARD_DOCK_JSON` | `~/.config/cmux/dock.json` | 期待タイトルの取得元 |
+| `CMUX_DOCK_GUARD_DOCK_JSON` | `~/.config/cmux/dock.json` | 期待タイトル・commandの取得元 |
 | `CMUX_DOCK_GUARD_STATE_DIR` | `~/.local/state/cmux-dock-guard` | ログ・ロック・マーカーの置き場所 |
 | `CMUX_DOCK_GUARD_APP_PATH` | `/Applications/cmux.app/Contents/MacOS/cmux` | 起動インスタンス識別に使うcmux.appプロセスの実行パス |
-| `CMUX_DOCK_GUARD_SETTLE_SECS` | `30` | 起動検知後、1回目の判定までの待ち |
-| `CMUX_DOCK_GUARD_RECHECK_GAP_SECS` | `15` | 1回目劣化検知後、2回目判定までの待ち（誤検知防御） |
-| `CMUX_DOCK_GUARD_POST_REPAIR_SECS` | `5` | 各修復手段の実行後、再判定までの待ち |
+| `CMUX_DOCK_GUARD_SETTLE_SECS` | `12` | 起動検知後、1回目の判定までの待ち |
+| `CMUX_DOCK_GUARD_RECHECK_GAP_SECS` | `6` | 1回目劣化検知後、2回目判定までの待ち（誤検知防御） |
+| `CMUX_DOCK_GUARD_POST_REPAIR_SECS` | `5` | 修復実行後、再判定までの待ち |
 | `CMUX_DOCK_GUARD_LOCK_STALE_SECS` | `120` | この秒数を超えて残るロックは前回のクラッシュ跡とみなし奪取する |
+| `CMUX_DOCK_GUARD_IS_UP_RETRIES` | `10` | `cmux ping`が空振りした時のリトライ回数 |
+| `CMUX_DOCK_GUARD_IS_UP_RETRY_GAP_SECS` | `2` | 上記リトライの間隔（秒） |
+| `CMUX_DOCK_GUARD_CMUX_CALL_TIMEOUT_SECS` | `15` | cmux呼び出し1回あたりのタイムアウト |
+| `CMUX_DOCK_GUARD_WATCHDOG_SECS` | `300` | スクリプト全体のウォッチドッグ発火までの秒数 |
 
 ## ログ・状態
 
@@ -98,7 +126,10 @@ unlink+再作成されるが、**launchdはWatchPathsに指定したパスその
 
 LaunchAgentの`StandardOutPath`/`StandardErrorPath`は別途
 `~/.local/state/cmux-dock-guard/launchd.log`（bashのfatalエラー等、
-`guard.log`より前に落ちた場合の捕捉用）。
+`guard.log`より前に落ちた場合の捕捉用）。`install.sh`がこのディレクトリと
+`~/.local/state/cmux`（WatchPaths対象）の両方を事前に`mkdir -p`する
+（launchdは親ディレクトリが無いと監視自体を付けられない・ログ出力先が
+無いとジョブがspawnに失敗しうるため）。
 
 ## テスト
 
@@ -106,11 +137,12 @@ LaunchAgentの`StandardOutPath`/`StandardErrorPath`は別途
 bash tests/test-cmux-dock-guard.sh
 ```
 
-実cmux・実launchd・実HOMEには一切依存しない。`PATH`上に偽の`cmux`/`ps`を置き、
-待ち時間の環境変数を0にして高速に実行する。
+実cmux・実launchd・実HOMEには一切依存しない。`PATH`上に偽の`cmux`/`ps`/
+`pgrep`を置き、待ち時間の環境変数を0にして高速に実行する。
 
-LaunchAgentの設置ロジック（テンプレート展開・launchctlタイムアウト）は
-リポジトリ直下の `tests/test-cmux-dock-guard-launchagent.sh` にある。
+LaunchAgentの設置ロジック（テンプレート展開・`mkdir -p`・launchctlタイム
+アウト）はリポジトリ直下の `tests/test-cmux-dock-guard-launchagent.sh` に
+ある。
 
 ## 既知の制約
 
@@ -119,12 +151,15 @@ LaunchAgentの設置ロジック（テンプレート展開・launchctlタイム
   ユーザーが手動で別のウィンドウを開閉すると誤認識しうる（その場合は新規
   ウィンドウを一意に特定できず、エラーログを残してそれ以上の自動操作を
   行わずに終了する＝安全側に倒す）。
-- 起動インスタンス識別は`pgrep -f -x`ではなく`ps -axo pid=,command=`の全件
-  フィルタで行っている。実装中の実機検証で、`pgrep -f`がcmux.appプロセス
-  （`ps`には確実に見えている）に対して常に空振りする現象を確認したため
-  （原因未特定。単純なシェルスクリプトの子プロセスに対しては`pgrep -f`も
-  正常にヒットした＝プロセス判定側では`pgrep -f`をそのまま使っている。
-  対象プロセスの種類に依存する何らかの制限と見られる）。
+- 起動インスタンス識別は`pgrep -f -x`ではなく`ps -axww -o pid=,command=`の
+  全件フィルタで行っている。実装中の実機検証で、`pgrep -f`がcmux.app
+  プロセス（`ps`には確実に見えている）に対して常に空振りする現象を確認
+  したため（原因未特定。単純なシェルスクリプトの子プロセスに対しては
+  `pgrep -f`も正常にヒットした＝プロセス判定側では`pgrep -f`をそのまま
+  使っている。対象プロセスの種類に依存する何らかの制限と見られる）。
+  `-ww`は端末幅での切り詰め防止（launchd配下はtty無しで既定80桁になり
+  うり、`/Applications/cmux.app/Contents/MacOS/cmux`より長い実行パスだと
+  切れて完全一致判定が常に不成立になりかねないため）。
 - cmuxソケットが瞬間的に応答しない（`cmux ping`やDock状態取得コマンドが
   一時的に失敗する）タイミングで2回目の劣化判定〜修復が走ると、実際には
   健全なのに`new-window`修復が空振りし、ERRORログだけ残ってこのインスタンス
@@ -135,3 +170,15 @@ LaunchAgentの設置ロジック（テンプレート展開・launchctlタイム
   場合、プロセス判定は先頭トークンのbasenameしか見ないため、実際の生存
   確認としては粗い近似になる。このリポジトリのdock.json（Usage/Next/
   System、いずれも単一スクリプトパス）では問題にならない。
+- `command`の実行ファイルが存在しない（`[ -x ]`で見えない）controlは
+  プロセス判定から除外する。そうしないと、そのcontrolのスクリプトを
+  導入していないマシン（例: `claude-codex-usage`リポジトリ未導入で
+  Usageコントロールの実体が無いサブ機）で永久に「劣化」判定になり、
+  起動のたびにnew-window修復が走り続けてしまう。裏を返すと、実行ファイルが
+  存在しないcontrolについては生存確認自体が行われない（title判定だけが
+  効く）。
+- 修復（new-window方式）の後、選択中のワークスペースやフォーカスが元と
+  同じになる保証は無い（移動順は`list-windows`/`workspace list`の返す順に
+  依存する）。ターミナル内のセッション自体（エージェントの会話など）は
+  cmuxのワークスペース移動で保持されるが、「どのワークスペースが最前面に
+  出るか」は変わりうる。

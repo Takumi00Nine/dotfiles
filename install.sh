@@ -47,7 +47,7 @@ link() {  # link <repo-relative-source> <destination>
 # macOSの標準bashには`timeout`コマンドが無い（GNU coreutils由来）。バックグラウンド
 # 実行+`kill $pid`だけでは launchctl が起動する子プロセスが残りうるため、`set -m`で
 # ジョブ制御を有効にしてバックグラウンドジョブを独立プロセスグループにし、
-# タイムアウト時は負PID（`kill -- -$pid`）でグループごとkillする
+# タイムアウト時は負PID（`kill -TERM "-$pid"`）でグループごとkillする
 # （TERM→1秒猶予→KILL。実証済みパターン: macos-bash-timeout-process-group）。
 run_with_timeout() {
   local secs="$1"
@@ -61,30 +61,35 @@ run_with_timeout() {
   ( sleep "$secs"; kill -TERM "-$cmd_pid" 2>/dev/null; sleep 1; kill -KILL "-$cmd_pid" 2>/dev/null ) &
   local watcher_pid=$!
   local rc=0
-  wait "$cmd_pid" 2>/dev/null
-  rc=$?
+  # `set -e`下で`wait`が裸(単独文)のまま失敗すると、`rc=$?`を実行する前に
+  # スクリプトごと落ちる（Opus 5レビュー指摘・MINOR）。`|| rc=$?`で1文に
+  # まとめてset -eを無効化する。
+  wait "$cmd_pid" 2>/dev/null || rc=$?
   kill "$watcher_pid" 2>/dev/null
   wait "$watcher_pid" 2>/dev/null
   return "$rc"
 }
 
 # generate_plist_from_template <repo-relative template> <destination>
-# __DOTFILES_HOME__ を実 $HOME へ置換した実ファイルを生成する（plistはXMLで
-# シェル変数展開されないため）。sedのメタ文字（& \ #）は$HOME側でエスケープし、
-# 生成はmktempへ書いてからmvで原子的に行う（$HOMEに&や\が含まれる環境での
-# 置換破損・書き込み中断時の破損を防ぐ）。
+# __DOTFILES_HOME__ を実 $HOME へ、__DOTFILES_DIR__ を実際のこのリポジトリの
+# パス（$DIR。~/work/dotfiles以外にcloneした場合に備える。Opus 5レビュー
+# 指摘・MINOR）へ置換した実ファイルを生成する（plistはXMLでシェル変数展開
+# されないため）。sedのメタ文字（& \ #）は置換元の値ごとにエスケープし、
+# 生成はmktempへ書いてからmvで原子的に行う（$HOME/$DIRに&や\が含まれる環境
+# での置換破損・書き込み中断時の破損を防ぐ）。
 # 注意: cleanupに`trap ... RETURN`は使わない — RETURN trapは設定した関数
 # 自身の復帰だけでなく、その後に別の関数が復帰するたびにも発火するため、
 # ここで`local tmp`のスコープが外れた後の他関数呼び出し時に
 # "unbound variable"で落ちる（実装中に実測）。代わりにsed失敗時だけ
 # 明示的にrmする。
 generate_plist_from_template() {
-  local src="$DIR/$1" dest="$2" escaped_home tmp rc=0
+  local src="$DIR/$1" dest="$2" escaped_home escaped_dir tmp rc=0
   [ -f "$src" ] || { echo "skip: template missing: $src" >&2; return 1; }
   mkdir -p "$(dirname "$dest")"
   escaped_home=$(printf '%s' "$HOME" | sed -e 's/[&\]/\\&/g' -e 's/#/\\#/g')
+  escaped_dir=$(printf '%s' "$DIR" | sed -e 's/[&\]/\\&/g' -e 's/#/\\#/g')
   tmp="$(mktemp "$(dirname "$dest")/.$(basename "$dest").dotfiles-tmp.XXXXXX")"
-  if sed "s#__DOTFILES_HOME__#${escaped_home}#g" "$src" > "$tmp"; then
+  if sed -e "s#__DOTFILES_HOME__#${escaped_home}#g" -e "s#__DOTFILES_DIR__#${escaped_dir}#g" "$src" > "$tmp"; then
     mv "$tmp" "$dest"
   else
     rc=1
@@ -116,6 +121,12 @@ install_launchagent() {
 # なのでusage-refreshのような前提ガードは無く常に設置する。
 install_cmux_dock_guard_launchagent() {
   local dest="$HOME/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist"
+  # plistのStandardOutPath/StandardErrorPathが指す~/.local/state/cmux-dock-guard/
+  # と、WatchPathsが監視する~/.local/state/cmux/を先に作っておく。launchdは
+  # 親ディレクトリが存在しないと監視自体を付けられない・ログ出力先が無いと
+  # ジョブがspawnに失敗しうる（Opus 5レビュー指摘・BLOCKING。実機で
+  # ~/.local/state/cmux-dock-guard が存在しないことを確認済み）。
+  mkdir -p "$HOME/.local/state/cmux-dock-guard" "$HOME/.local/state/cmux"
   if ! generate_plist_from_template launchagents/com.takumi009.cmux-dock-guard.plist.template "$dest"; then
     echo "WARN: cmux-dock-guard plistの生成に失敗しました: $dest" >&2
     return

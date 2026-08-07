@@ -38,12 +38,23 @@ echo "=== (a) SKIP_LAUNCHCTL=1なら実launchdへ一切触れずplistだけ生�
   assert_true "plistが生成される" "$([ -f "$DEST" ] && echo 1 || echo 0)"
   assert_true "プレースホルダ__DOTFILES_HOME__が残っていない" \
     "$(grep -q '__DOTFILES_HOME__' "$DEST" && echo 0 || echo 1)"
-  assert_true "FAKE_HOMEの実パスに置換されている(cmux-dock-guard.sh本体を直接指す)" \
-    "$(grep -qF "$FAKE_HOME/work/dotfiles/cmux/cmux-dock-guard/cmux-dock-guard.sh" "$DEST" && echo 1 || echo 0)"
+  assert_true "プレースホルダ__DOTFILES_DIR__が残っていない" \
+    "$(grep -q '__DOTFILES_DIR__' "$DEST" && echo 0 || echo 1)"
+  # ProgramArgumentsは実際のこのリポジトリのチェックアウト先(REPO_ROOT)を
+  # 指す。__DOTFILES_HOME__/work/dotfiles決め打ちだと、~/work/dotfiles以外に
+  # cloneした環境で存在しないスクリプトを指してしまう（Opus 5レビュー指摘・
+  # MINOR）。HOMEをFAKE_HOMEへ差し替えてもinstall.shの$DIRは実リポジトリの
+  # 場所のままなので、FAKE_HOME配下ではなくREPO_ROOTを指すのが正しい。
+  assert_true "ProgramArgumentsは実リポジトリのcmux-dock-guard.shを直接指す" \
+    "$(grep -qF "$REPO_ROOT/cmux/cmux-dock-guard/cmux-dock-guard.sh" "$DEST" && echo 1 || echo 0)"
   assert_true "WatchPathsはcmuxソケットのディレクトリ(ファイル単体ではない)を指す" \
     "$(grep -qF "$FAKE_HOME/.local/state/cmux</string>" "$DEST" && echo 1 || echo 0)"
-  assert_true "StartIntervalの安全網(60秒)が入っている" \
-    "$(grep -qF '<integer>60</integer>' "$DEST" && echo 1 || echo 0)"
+  assert_true "StartIntervalの安全網(20秒。目安60秒以内の復元要件に対して十分短い)が入っている" \
+    "$(grep -qF '<integer>20</integer>' "$DEST" && echo 1 || echo 0)"
+  assert_true "WatchPaths対象の~/.local/state/cmuxディレクトリが作られる(BLOCKING対応: 無いとlaunchdが監視を付けられない)" \
+    "$([ -d "$FAKE_HOME/.local/state/cmux" ] && echo 1 || echo 0)"
+  assert_true "StandardOutPath/ErrorPath対象の~/.local/state/cmux-dock-guardディレクトリが作られる(BLOCKING対応: 無いとjobがspawn失敗しうる)" \
+    "$([ -d "$FAKE_HOME/.local/state/cmux-dock-guard" ] && echo 1 || echo 0)"
   if command -v plutil >/dev/null 2>&1; then
     assert_true "生成されたplistはplutil -lintを通過する" \
       "$(plutil -lint "$DEST" >/dev/null 2>&1 && echo 1 || echo 0)"
@@ -80,6 +91,13 @@ done
 exit 0
 EOF
   chmod +x "$STUB_BIN/launchctl"
+
+  # このテストはSKIP_LAUNCHCTLを敢えて外してPATHシムだけに実launchctl抑止を
+  # 依存させている。シム作成が何らかの理由で失敗すると、生成したFAKE_HOME
+  # 向けplistが実launchdへ登録されてしまう（Opus 5レビュー指摘・MINOR）。
+  # 走らせる前にシムが確実に解決されることを確認する。
+  assert_true "偽launchctlがPATH解決の先頭に来ている(実launchdへ登録される事故を防ぐ前提)" \
+    "$([ "$(PATH="$STUB_BIN:$PATH" command -v launchctl)" = "$STUB_BIN/launchctl" ] && echo 1 || echo 0)"
 
   START=$(date +%s)
   rc=0

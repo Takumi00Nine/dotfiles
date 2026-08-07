@@ -140,6 +140,12 @@ EOF2
         *) shift ;;
       esac
     done
+    # fail_move_forに書かれたworkspace idと一致する場合は失敗させる（BLOCKING
+    # 回帰テスト用: move失敗時に旧ウィンドウを閉じないことの検証）。実際の
+    # cmuxのAPI失敗を模し、ws_owner.tsvは一切変更しない（移動していないので）。
+    if [ -f "\$STUB_DIR/fail_move_for" ] && [ "\$(cat "\$STUB_DIR/fail_move_for")" = "\$ws" ]; then
+      exit 1
+    fi
     awk -F'\t' -v w="\$ws" '\$1 != w' "\$STUB_DIR/ws_owner.tsv" > "\$STUB_DIR/ws_owner.tsv.tmp" 2>/dev/null || true
     mv "\$STUB_DIR/ws_owner.tsv.tmp" "\$STUB_DIR/ws_owner.tsv"
     printf '%s\t%s\n' "\$ws" "\$win" >> "\$STUB_DIR/ws_owner.tsv"
@@ -162,15 +168,16 @@ STUB
   chmod +x "$stub_bin/cmux"
 
   # 実機検証で `pgrep -f -x` がcmux.appプロセスに対して空振りすることが判明
-  # したため、本体スクリプトは`ps -axo pid=,command=`の全件フィルタで起動
-  # インスタンスを特定する（cmux-dock-guard.sh のコメント参照）。この偽ps
-  # は本体が実際に発行する2種類の呼び出し方を両方エミュレートする:
-  #   ps -axo pid=,command=       -> "<PID> <APP_PATH>" の1行（app_pidがあれば）
+  # したため、本体スクリプトは`ps -axww -o pid=,command=`の全件フィルタで起動
+  # インスタンスを特定する（cmux-dock-guard.sh のコメント参照。-wwはOpus 5
+  # レビュー指摘のMINOR対応で追加＝launchd配下tty無しでの列幅切り詰め防止）。
+  # この偽psは本体が実際に発行する2種類の呼び出し方を両方エミュレートする:
+  #   ps -axww -o pid=,command=   -> "<PID> <APP_PATH>" の1行（app_pidがあれば）
   #   ps -o lstart= -p <PID>      -> app_startの内容（app_pidと一致する時だけ）
   cat > "$stub_bin/ps" <<STUB
 #!/usr/bin/env bash
 STUB_DIR="$stub_dir"
-if [ "\${1:-}" = "-axo" ]; then
+if [ "\${1:-}" = "-axww" ]; then
   if [ -f "\$STUB_DIR/app_pid" ]; then
     printf '%s %s\n' "\$(cat "\$STUB_DIR/app_pid")" "/Applications/cmux.app/Contents/MacOS/cmux"
   fi
@@ -217,13 +224,25 @@ run_guard() {
 }
 
 # commandフィールドを持つ3コントロール構成。実dock.jsonと同じ3ペイン構成を
-# 模しつつ、パスは偽物（プロセス生存チェックのbasename抽出だけ検証すればよい）。
+# 模す。expected_process_patternsは実行ファイルが存在しないcommandを判定
+#対象から除外する仕様（Opus 5レビュー指摘・MAJOR対応）なので、テストでも
+# $2で渡されたディレクトリに実在する（何もしない）ダミー実行ファイルを
+# 作ってそのパスをcommandに書く。
 make_dock_json() {
-  cat > "$1" <<'EOF'
+  local dock_json="$1" scripts_dir="$2"
+  mkdir -p "$scripts_dir/fakebin"
+  for name in usage-watch next-watch system-watch; do
+    cat > "$scripts_dir/fakebin/$name.sh" <<'EOF'
+#!/bin/bash
+sleep 60
+EOF
+    chmod +x "$scripts_dir/fakebin/$name.sh"
+  done
+  cat > "$dock_json" <<EOF
 {"controls":[
-  {"id":"usage","title":"Usage","command":"$HOME/fake/usage-watch.sh"},
-  {"id":"next","title":"Next","command":"$HOME/fake/next-watch.sh"},
-  {"id":"system","title":"System","command":"$HOME/fake/system-watch.sh"}
+  {"id":"usage","title":"Usage","command":"$scripts_dir/fakebin/usage-watch.sh"},
+  {"id":"next","title":"Next","command":"$scripts_dir/fakebin/next-watch.sh"},
+  {"id":"system","title":"System","command":"$scripts_dir/fakebin/system-watch.sh"}
 ]}
 EOF
 }
@@ -242,7 +261,7 @@ echo "=== (a) cmuxが起動していない場合は何もせず終了する ==="
   STUB_BIN="$WORKDIR/a/bin"; STUB_DIR="$WORKDIR/a/stub"; STATE_DIR="$WORKDIR/a/state"; DOCK_JSON="$WORKDIR/a/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   # cmux_upファイルを置かない = ping失敗
 
   run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
@@ -260,7 +279,7 @@ echo "=== (b) 健全なDock（title一致＋プロセス生存）はそのまま
   STUB_BIN="$WORKDIR/b/bin"; STUB_DIR="$WORKDIR/b/stub"; STATE_DIR="$WORKDIR/b/state"; DOCK_JSON="$WORKDIR/b/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -281,7 +300,7 @@ echo "=== (c) 1回目劣化・2回目健全（誤検知）は修復しない ===
   STUB_BIN="$WORKDIR/c/bin"; STUB_DIR="$WORKDIR/c/stub"; STATE_DIR="$WORKDIR/c/state"; DOCK_JSON="$WORKDIR/c/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -308,7 +327,7 @@ echo "=== (d) title一致でもプロセスが死んでいれば劣化として�
   STUB_BIN="$WORKDIR/d/bin"; STUB_DIR="$WORKDIR/d/stub"; STATE_DIR="$WORKDIR/d/state"; DOCK_JSON="$WORKDIR/d/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -337,7 +356,7 @@ echo "=== (e) Dockペインが存在しない(タイトルが全く現れない)
   STUB_BIN="$WORKDIR/e/bin"; STUB_DIR="$WORKDIR/e/stub"; STATE_DIR="$WORKDIR/e/state"; DOCK_JSON="$WORKDIR/e/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -364,7 +383,7 @@ echo "=== (f) 2回連続で劣化 -> new-window方式で修復（複数ウィン
   STUB_BIN="$WORKDIR/f/bin"; STUB_DIR="$WORKDIR/f/stub"; STATE_DIR="$WORKDIR/f/state"; DOCK_JSON="$WORKDIR/f/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -397,7 +416,7 @@ echo "=== (g) 2回連続で劣化 -> new-windowでも直らない場合はERROR�
   STUB_BIN="$WORKDIR/g/bin"; STUB_DIR="$WORKDIR/g/stub"; STATE_DIR="$WORKDIR/g/state"; DOCK_JSON="$WORKDIR/g/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -423,7 +442,7 @@ echo "=== (h) 同一インスタンスへの2回目呼び出しは何もしな�
   STUB_BIN="$WORKDIR/h/bin"; STUB_DIR="$WORKDIR/h/stub"; STATE_DIR="$WORKDIR/h/state"; DOCK_JSON="$WORKDIR/h/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -445,7 +464,7 @@ echo "=== (i) 新しいcmux起動インスタンス(PID+起動時刻が変わる
   STUB_BIN="$WORKDIR/i/bin"; STUB_DIR="$WORKDIR/i/stub"; STATE_DIR="$WORKDIR/i/state"; DOCK_JSON="$WORKDIR/i/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -491,7 +510,7 @@ echo "=== (k) ロック中は多重実行しない ==="
   STUB_BIN="$WORKDIR/k/bin"; STUB_DIR="$WORKDIR/k/stub"; STATE_DIR="$WORKDIR/k/state"; DOCK_JSON="$WORKDIR/k/dock.json"
   mkdir -p "$STUB_DIR"
   setup_stub_bin "$STUB_BIN" "$STUB_DIR"
-  make_dock_json "$DOCK_JSON"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
   touch "$STUB_DIR/cmux_up"
   echo "4242" > "$STUB_DIR/app_pid"
   echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
@@ -504,6 +523,66 @@ echo "=== (k) ロック中は多重実行しない ==="
   assert_eq "exit 0で終了する" "0" "$rc"
   assert_true "ロック中はcmuxを一切呼ばない" "$([ ! -f "$STUB_DIR/calls.log" ] && echo 1 || echo 0)"
   assert_true "マーカーも書かれない" "$([ ! -f "$STATE_DIR/last-evaluated-instance" ] && echo 1 || echo 0)"
+}
+
+echo "=== (l) ワークスペース移動が1件失敗したウィンドウは閉鎖しない(データ消失防止) ==="
+# Opus 5レビュー指摘・BLOCKING回帰テスト。
+{
+  STUB_BIN="$WORKDIR/l/bin"; STUB_DIR="$WORKDIR/l/stub"; STATE_DIR="$WORKDIR/l/state"; DOCK_JSON="$WORKDIR/l/dock.json"
+  mkdir -p "$STUB_DIR"
+  setup_stub_bin "$STUB_BIN" "$STUB_DIR"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
+  touch "$STUB_DIR/cmux_up"
+  echo "4242" > "$STUB_DIR/app_pid"
+  echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
+  printf 'Usage\nNext\nTerminal\n' > "$STUB_DIR/observed_titles"
+  printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/healthy_titles"
+  touch "$STUB_DIR/newwin_reseeds"
+  set_all_processes_alive "$STUB_DIR"
+  # WIN1にWS1(移動成功)とWS2(移動失敗)、WIN2にWS3(移動成功)。
+  printf 'WIN1\t0\nWIN2\t1\n' > "$STUB_DIR/windows.tsv"
+  printf 'WS1\tWIN1\nWS2\tWIN1\nWS3\tWIN2\n' > "$STUB_DIR/ws_owner.tsv"
+  echo "WS2" > "$STUB_DIR/fail_move_for"
+
+  run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
+  rc=$?
+  assert_eq "exit 0で終了する" "0" "$rc"
+  assert_true "移動が全部成功したWIN2はclose-windowされる" \
+    "$(grep -q 'close-window --window WIN2' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
+  assert_true "移動漏れがあるWIN1はclose-windowされない(作業消失防止)" \
+    "$(! grep -q 'close-window --window WIN1' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
+  assert_true "WS2はWIN1所有のまま残る(移動されていない)" \
+    "$(awk -F'\t' '$1=="WS2"{print $2}' "$STUB_DIR/ws_owner.tsv" | grep -qx 'WIN1' && echo 1 || echo 0)"
+  assert_true "ERRORログに移動漏れの旨が記録される" \
+    "$(grep -q 'ウィンドウ WIN1 で1件以上のワークスペース移動に失敗したため閉鎖せず残置' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
+}
+
+echo "=== (m) 実行ファイルが存在しないcontrolはプロセス判定から除外される ==="
+# Opus 5レビュー指摘・MAJOR。claude-codex-usage等の依存リポジトリを導入して
+# いないマシンで、対応する実行ファイルが存在しないcontrolを「常に劣化」と
+# 誤判定して毎起動new-window修復が走り続けるのを防ぐ。
+{
+  STUB_BIN="$WORKDIR/m/bin"; STUB_DIR="$WORKDIR/m/stub"; STATE_DIR="$WORKDIR/m/state"; DOCK_JSON="$WORKDIR/m/dock.json"
+  mkdir -p "$STUB_DIR"
+  setup_stub_bin "$STUB_BIN" "$STUB_DIR"
+  make_dock_json "$DOCK_JSON" "$STUB_DIR"
+  # usageコントロールの実行ファイルを未導入マシン相当にする(削除)。
+  rm -f "$STUB_DIR/fakebin/usage-watch.sh"
+  touch "$STUB_DIR/cmux_up"
+  echo "4242" > "$STUB_DIR/app_pid"
+  echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
+  printf 'Usage\nNext\nSystem\n' > "$STUB_DIR/observed_titles"
+  # next-watch.sh/system-watch.shだけ生存させる(usage-watch.shは実行ファイル
+  # が無いので判定対象から除外され、生存有無を問われないはず)。
+  printf 'next-watch.sh\nsystem-watch.sh\n' > "$STUB_DIR/alive_patterns"
+
+  run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON"
+  rc=$?
+  assert_eq "exit 0で終了する" "0" "$rc"
+  assert_true "実行ファイルが無いcontrolのプロセス不在は劣化とみなされず、修復されない" \
+    "$(! grep -q 'new-window' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
+  assert_true "ログに『1回目判定で健全』が記録される" \
+    "$(grep -q '1回目判定で健全' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
 }
 
 echo
