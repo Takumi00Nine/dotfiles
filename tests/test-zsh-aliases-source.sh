@@ -116,6 +116,98 @@ EOF
   rm -rf "$FAKE_HOME"
 }
 
+# cct の argv 実測テスト((e)(f)(g))共通のセットアップ。
+# - cmuxはPATH上のstubへ差し替える。ただし実cmuxパネル内で実行すると
+#   CMUX_BUNDLED_CLI_PATH が既に実バイナリを指しており、cct内の
+#   `${CMUX_BUNDLED_CLI_PATH:-cmux}` がPATH解決を経ずそちらを直接使って
+#   しまう（=このstubを迂回して実cmuxを起動しかねない・実測して判明した
+#   罠）。空に上書きしてPATH経由でstubを解決させる。
+# - HOMEもFAKE_HOMEへ隔離する（cctは`cd ~/Claude`するため、実`~/Claude`の
+#   有無や実`~/work/dotfiles/cmux/claude-cmux-hooks.json`の有無に結果が
+#   依存しないようにする。Codexレビュー2026-08-07指摘）。
+# - stdinも/dev/nullへ明示的に切る（何らかの理由で実バイナリが起動した
+#   場合に標準入力待ちでハングするのを避ける保険）。
+run_cct_argv() {
+  local fake_home="$1" stubdir="$2" argv_log="$3"
+  shift 3
+  PATH="$stubdir:$PATH" CMUX_ARGV_LOG="$argv_log" CMUX_BUNDLED_CLI_PATH= HOME="$fake_home" zsh -c '
+    source "'"$REPO_ROOT"'/zsh/aliases.zsh"
+    cct "$@" >/dev/null 2>&1
+    cat "$CMUX_ARGV_LOG"
+  ' _ "$@" < /dev/null
+}
+
+echo "=== (e) cct: --teammate-mode省略時は既定で --teammate-mode in-process が注入される ==="
+{
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/Claude"
+  STUBDIR="$(mktemp -d)"
+  cat > "$STUBDIR/cmux" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CMUX_ARGV_LOG"
+EOF
+  chmod +x "$STUBDIR/cmux"
+  ARGV_LOG="$(mktemp)"
+
+  ARGV_OUT="$(run_cct_argv "$FAKE_HOME" "$STUBDIR" "$ARGV_LOG" foo bar)"
+
+  assert_true "既定でmode_argsに--teammate-modeが注入される" \
+    "$(echo "$ARGV_OUT" | grep -qF -- '--teammate-mode' && echo 1 || echo 0)"
+  assert_true "既定注入の値はin-process" \
+    "$(echo "$ARGV_OUT" | grep -A1 -- '--teammate-mode' | tail -n1 | grep -qF 'in-process' && echo 1 || echo 0)"
+  assert_true "呼び出し側の引数(foo bar)もそのまま渡される" \
+    "$(echo "$ARGV_OUT" | grep -qF 'foo' && echo "$ARGV_OUT" | grep -qF 'bar' && echo 1 || echo 0)"
+
+  rm -rf "$FAKE_HOME" "$STUBDIR"
+  rm -f "$ARGV_LOG"
+}
+
+echo "=== (f) cct: 呼び出し側が --teammate-mode を明示したら既定注入を譲る ==="
+{
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/Claude"
+  STUBDIR="$(mktemp -d)"
+  cat > "$STUBDIR/cmux" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CMUX_ARGV_LOG"
+EOF
+  chmod +x "$STUBDIR/cmux"
+  ARGV_LOG="$(mktemp)"
+
+  ARGV_OUT="$(run_cct_argv "$FAKE_HOME" "$STUBDIR" "$ARGV_LOG" --teammate-mode auto)"
+
+  assert_true "--teammate-mode auto を明示したら既定のin-process注入は入らない" \
+    "$(echo "$ARGV_OUT" | grep -qF 'in-process' && echo 0 || echo 1)"
+  assert_true "呼び出し側の--teammate-mode autoはそのまま渡される" \
+    "$(echo "$ARGV_OUT" | grep -qF -- '--teammate-mode' && echo "$ARGV_OUT" | grep -qF 'auto' && echo 1 || echo 0)"
+
+  rm -rf "$FAKE_HOME" "$STUBDIR"
+  rm -f "$ARGV_LOG"
+}
+
+echo "=== (g) cct: -- 以降の引数は --teammate-mode に見えても明示指定と誤判定しない ==="
+{
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/Claude"
+  STUBDIR="$(mktemp -d)"
+  cat > "$STUBDIR/cmux" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$CMUX_ARGV_LOG"
+EOF
+  chmod +x "$STUBDIR/cmux"
+  ARGV_LOG="$(mktemp)"
+
+  ARGV_OUT="$(run_cct_argv "$FAKE_HOME" "$STUBDIR" "$ARGV_LOG" -- --teammate-mode is-a-prompt-not-a-flag)"
+
+  assert_true "-- 以降の文字列に惑わされず既定のin-process注入が入る" \
+    "$(echo "$ARGV_OUT" | grep -qF 'in-process' && echo 1 || echo 0)"
+  assert_true "-- とその後の引数(プロンプト)はそのまま渡される" \
+    "$(echo "$ARGV_OUT" | grep -qxF -- '--' && echo "$ARGV_OUT" | grep -qF 'is-a-prompt-not-a-flag' && echo 1 || echo 0)"
+
+  rm -rf "$FAKE_HOME" "$STUBDIR"
+  rm -f "$ARGV_LOG"
+}
+
 echo
 echo "=== 結果: PASS=$PASS FAIL=$FAIL ==="
 if [ "$FAIL" -gt 0 ]; then
