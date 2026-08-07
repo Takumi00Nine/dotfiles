@@ -45,7 +45,7 @@ echo "=== (a) 初回実行でsource行が1行入る ==="
   printf '# 既存の.zshrc\nexport FOO=bar\n' > "$FAKE_HOME/.zshrc"
 
   rc=0
-  out=$(HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 bash "$INSTALL_SH" 2>&1) || rc=$?
+  out=$(HOME="$FAKE_HOME" bash "$INSTALL_SH" 2>&1) || rc=$?
   ZSHRC="$FAKE_HOME/.zshrc"
   COUNT="$(grep -cF "$MARKER" "$ZSHRC" || true)"
 
@@ -65,12 +65,12 @@ echo "=== (b) 3回連続実行しても1行のまま（冪等） ==="
   printf '# 既存の.zshrc\n' > "$FAKE_HOME/.zshrc"
 
   for i in 1 2 3; do
-    HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 bash "$INSTALL_SH" >/dev/null 2>&1
+    HOME="$FAKE_HOME" bash "$INSTALL_SH" >/dev/null 2>&1
   done
   COUNT="$(grep -cF "$MARKER" "$FAKE_HOME/.zshrc" || true)"
   assert_eq "3回実行しても目印付きsource行は1行のまま" "1" "$COUNT"
 
-  out3=$(HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 bash "$INSTALL_SH" 2>&1)
+  out3=$(HOME="$FAKE_HOME" bash "$INSTALL_SH" 2>&1)
   assert_true "4回目はskipメッセージが出る" \
     "$(echo "$out3" | grep -q 'skip: ~/.zshrcには既に' && echo 1 || echo 0)"
 
@@ -83,7 +83,7 @@ echo "=== (c) .zshrcが存在しない場合は新規作成される ==="
   # .zshrcを意図的に作らない
 
   rc=0
-  HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 bash "$INSTALL_SH" >/dev/null 2>&1 || rc=$?
+  HOME="$FAKE_HOME" bash "$INSTALL_SH" >/dev/null 2>&1 || rc=$?
   ZSHRC="$FAKE_HOME/.zshrc"
 
   assert_eq "install.sh自体はexit 0で完走する" "0" "$rc"
@@ -106,7 +106,7 @@ alias ll='ls -la'
 EOF
   ORIG_HEAD="$(head -n 5 "$FAKE_HOME/.zshrc")"
 
-  HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 bash "$INSTALL_SH" >/dev/null 2>&1
+  HOME="$FAKE_HOME" bash "$INSTALL_SH" >/dev/null 2>&1
   NEW_HEAD="$(head -n 5 "$FAKE_HOME/.zshrc")"
 
   assert_eq "先頭5行(既存内容)が一切変更されない" "$ORIG_HEAD" "$NEW_HEAD"
