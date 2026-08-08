@@ -10,7 +10,11 @@
   // 経緯: Vault Preferences/cmux-notifications・Decisions/2026-07-05-cmux-notifications-actionable-only）
   "automation" : {
     "claudeCodeIntegration" : true,
-    "suppressSubagentNotifications" : true
+    "suppressSubagentNotifications" : true,
+    // socketControlMode: 既定 cmuxOnly は「cmux 内で起動されたプロセスのみ接続可」で、
+    // launchd 起動の cmux-dock-guard がソケットに接続できない（2026-08-08 実測）。
+    // ソケット自体が 0600（同一ユーザー限定）なので automation 開放のリスク増分は小さい。
+    "socketControlMode" : "automation"
   },
   // 通知フィルタ（2026-08-05 タクミン指定＝音・バナー・未読リング・ペインフラッシュを
   // 「リーダーが本人を呼ぶとき」だけにする。hooks で全通知の sound/desktop/markUnread/paneFlash
