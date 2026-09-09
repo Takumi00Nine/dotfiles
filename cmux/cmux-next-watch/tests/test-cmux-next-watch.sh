@@ -98,6 +98,21 @@ assert_order() {
   assert_true "$desc" "$ok"
 }
 
+# fixture Vault 全体の内容ハッシュとmtimeのスナップショットを返す（AC-33用）。
+# 名前・秒単位mtime・サイズだけでは内容の書換えを検知できない（verifier実装
+# レビュー2巡目 #10・MAJOR対応）ため、内容ハッシュ（shasum -a 256）を各行へ
+# 追加する。test-cmux-task-watch.shのvault_snapshotと同じ設計だが、この
+# ファイルはfixtureごとに別ディレクトリのVaultを使うため引数でVaultパスを
+# 受け取る形にしてある。
+vault_snapshot() {
+  local vault="$1"
+  find "$vault" -type f -print 2>/dev/null | sort | while IFS= read -r f; do
+    printf '%s %s\n' \
+      "$(stat -f '%N %m %z' "$f" 2>/dev/null)" \
+      "$(shasum -a 256 "$f" 2>/dev/null | awk '{print $1}')"
+  done
+}
+
 # 1つの fixture Vault を組み立てる（複数テストで共用）。
 build_fixture_vault() {
   local vault="$1"
@@ -426,9 +441,16 @@ cat >"$INV_OK/2026-08-05.md" <<'EOF'
 自動生成。ノート312件を検査し、要確認 15 件。
 EOF
 MAINT_OK="$WORKDIR/maint-ok.json"
-cat >"$MAINT_OK" <<'EOF'
-{"last_success_at": "2026-08-05T11:13:16Z", "started_at": "2026-08-05T11:06:09Z"}
-EOF
+# 固定日時は実行時点からの経過日数（MAINT_STALE_DAYS=8）で「古い」判定に
+# ドリフトするため、MAINT_STALE と同じく実行時刻からの相対値で作る
+# （実測: 固定値 2026-08-05T11:13:16Z を使った旧実装は2026-09-09の実行で
+# 8日を超えて⚠判定になり、週次関連の4アサーションが失敗した）。
+python3 - "$MAINT_OK" <<'PYEOF'
+import json, sys, time
+recent = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 1 * 86400))
+with open(sys.argv[1], "w") as fh:
+    json.dump({"last_success_at": recent, "started_at": recent}, fh)
+PYEOF
 V5="$WORKDIR/vault5"
 mkdir -p "$V5/Projects"
 OUT5="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_OK" \
@@ -537,6 +559,255 @@ if command -v jq >/dev/null 2>&1 && [ ! -x "/usr/bin/jq" ] && [ ! -x "/bin/jq" ]
 else
   echo "SKIP: このホストの /usr/bin または /bin に jq があるため、jq不在ケースは検証できません"
 fi
+
+echo "=== fixture: FR-31 next: 未設定/空文字時の Tasks 節導出（AC-36〜AC-39・AC-47〜AC-50） ==="
+VN="$WORKDIR/vault-fr31"
+mkdir -p "$VN/Projects"
+
+# N-0（基底・AC-50の比較用）: 手書きの next: あり・updated が最も新しい
+cat >"$VN/Projects/proj-n0-base.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-09-08
+status: active
+next: N0基準next値
+---
+## Tasks
+### v1
+- [ ] N0のタスク
+EOF
+
+# AC-36（N-1相当）: 手書きの next: がある（Tasks 節もあるが next: を優先する）
+cat >"$VN/Projects/proj-n1-handwritten.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-09-05
+status: active
+next: 手書きのnext値
+---
+## Tasks
+### v1
+- [ ] Tasksの別タスク本文（next:優先時はここに出ないはず）
+EOF
+
+# AC-37（N-2相当）: next: 無し・先頭未完タスクが15コードポイント以内（[x]は除く）
+cat >"$VN/Projects/proj-n2-short.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-09-04
+status: active
+---
+## Tasks
+### v1
+- [x] 完了済みタスク
+- [ ] 短いタスク
+EOF
+
+# AC-38（N-3相当）: next: 無し・先頭未完タスクが15コードポイント超（省略記号なし）
+cat >"$VN/Projects/proj-n3-long.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-09-03
+status: active
+---
+## Tasks
+### v1
+- [ ] これは十五コードポイントを確実に超える長さの未完タスク本文
+EOF
+
+# AC-39（N-4相当）: next: も Tasks 節も無い（従来どおり --once で (next未設定)）
+cat >"$VN/Projects/proj-n4-none.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-09-02
+status: active
+---
+# next も Tasks 節も無いノート
+EOF
+
+# AC-47（N-5相当）: next: が空文字列で、Tasks 節がある → Tasks 節から導出する
+cat >"$VN/Projects/proj-n5-emptynext.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-09-06
+status: active
+next: ""
+---
+## Tasks
+### v1
+- [/] 進行中のタスク
+EOF
+
+# AC-48（N-6相当）: next: 無し・先頭未完タスクが TAB・改行相当（CR）・ESC を含む
+# → --list は1行4列のまま、制御文字はすべて無害化される。
+python3 - "$VN/Projects/proj-n6-control.md" <<'PYEOF'
+import sys
+esc = chr(27)
+cr = chr(13)
+tab = chr(9)
+body = "タスク" + tab + "本文" + cr + "続き" + esc + "[31m"
+content = (
+    "---\n"
+    "date: 2026-08-01\n"
+    "updated: 2026-08-25\n"
+    "status: active\n"
+    "---\n"
+    "## Tasks\n"
+    "### v1\n"
+    "- [ ] " + body + "\n"
+)
+with open(sys.argv[1], "w", encoding="utf-8") as fh:
+    fh.write(content)
+PYEOF
+
+# AC-49（N-7相当）: status: completed で next: は無いが Tasks 節がある
+# → --list にも --once の表示にも一切現れない
+cat >"$VN/Projects/proj-n7-completed.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-09-07
+status: completed
+---
+## Tasks
+### v1
+- [ ] completedなので出ないはず
+EOF
+
+# AC-50（N-8相当）: status: active・updated が N-0 より古い → N-0 より後に並ぶ
+cat >"$VN/Projects/proj-n8-older.md" <<'EOF'
+---
+date: 2026-08-01
+updated: 2026-08-10
+status: active
+next: N8のnext値
+---
+## Tasks
+### v1
+- [ ] N8のタスク
+EOF
+
+# AC-33・AC-34のN系横断検査（verifier実装レビュー2巡目 #10・MAJOR対応）:
+# N系にはこれまでVault snapshotが無く、cmux呼出の集約ログも無かった。
+# cmux-next-watch.shはcmuxバイナリを一切呼ばない設計（design.md §7・§11）
+# なので、偽cmuxスタブへ差し替えて「呼ばれない」ことをログで確認する
+# （AC-34）。あわせて--list/--onceの実行前後でVault全体の内容ハッシュを
+# 比較し、AC-33をN系にも横断させる。
+STUBBIN_N="$WORKDIR/stubbin-n"
+mkdir -p "$STUBBIN_N"
+CMUX_CALL_LOG_N="$WORKDIR/cmux_calls_n.log"
+: > "$CMUX_CALL_LOG_N"
+cat >"$STUBBIN_N/cmux" <<STUB
+#!/bin/bash
+echo "cmux \$*" >> "$CMUX_CALL_LOG_N"
+exit 0
+STUB
+chmod +x "$STUBBIN_N/cmux"
+
+VN_SNAPSHOT_BEFORE_LIST="$(vault_snapshot "$VN")"
+OUTN_LIST="$(PATH="$STUBBIN_N:$PATH" CMUX_NEXT_VAULT="$VN" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
+  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --list)"
+VN_SNAPSHOT_AFTER_LIST="$(vault_snapshot "$VN")"
+assert_true "AC-33: --list実行前後でN系fixture Vaultの内容が不変" \
+  "$([ "$VN_SNAPSHOT_BEFORE_LIST" = "$VN_SNAPSHOT_AFTER_LIST" ] && echo 1 || echo 0)"
+
+FIELD3_N1="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n1-handwritten" {print $3}')"
+if [ "$FIELD3_N1" = "手書きのnext値" ]; then
+  PASS=$(( PASS + 1 ))
+else
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-36: 手書きのnext:がTasks節より優先されない（実測: ${FIELD3_N1}）"
+fi
+
+FIELD3_N2="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n2-short" {print $3}')"
+if [ "$FIELD3_N2" = "短いタスク" ]; then
+  PASS=$(( PASS + 1 ))
+else
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-37: 先頭未完タスク（[x]を除く）が導出されない（実測: ${FIELD3_N2}）"
+fi
+
+# AC-38: 「15コードポイントに収まる」ではなく「先頭15文字との完全一致」で
+# 独立オラクルにする（検証職1巡目 #3指摘：長さと省略記号の不在だけでは
+# ズレた切り詰め方でも通ってしまう）。期待値は元タスク本文の最初の15文字
+# をこのテスト側で別途書き下ろした固定リテラル（実装のtruncate_plainの
+# 呼び出し結果を使い回さない）。
+FIELD3_N3="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n3-long" {print $3}')"
+EXPECT_N3="これは十五コードポイントを確実"
+if [ "$FIELD3_N3" = "$EXPECT_N3" ]; then
+  PASS=$(( PASS + 1 ))
+else
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-38: 導出値が先頭15文字と完全一致しない（期待: ${EXPECT_N3} / 実測: ${FIELD3_N3}）"
+fi
+assert_not_contains "AC-38: 15コードポイント切り詰めに省略記号は付かない" "$FIELD3_N3" "…"
+
+VN_SNAPSHOT_BEFORE_ONCE="$(vault_snapshot "$VN")"
+OUTN_ONCE="$(PATH="$STUBBIN_N:$PATH" CMUX_NEXT_VAULT="$VN" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
+  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
+VN_SNAPSHOT_AFTER_ONCE="$(vault_snapshot "$VN")"
+assert_true "AC-33: --once実行前後でN系fixture Vaultの内容が不変" \
+  "$([ "$VN_SNAPSHOT_BEFORE_ONCE" = "$VN_SNAPSHOT_AFTER_ONCE" ] && echo 1 || echo 0)"
+assert_contains "AC-39: next:もTasks節も無ければ--onceでも従来どおり(next未設定)" "$OUTN_ONCE" "(next未設定)"
+
+# AC-47: next: が空文字列のノートも、Tasks 節があれば導出対象になる
+# （fm_field が引用符を剥がした後の空文字列を「未設定」と同じに扱う経路）。
+FIELD3_N5="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n5-emptynext" {print $3}')"
+if [ "$FIELD3_N5" = "進行中のタスク" ]; then
+  PASS=$(( PASS + 1 ))
+else
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-47: next:が空文字列のノートでTasks節からの導出が効かない（実測: ${FIELD3_N5}）"
+fi
+
+# AC-48: TAB・CR（改行相当）・ESC を含むタスク本文でも、無害化された固定
+# 文字列と完全一致し、当該行が4列のまま・ESCバイトが1つも残らないこと。
+LINE_N6="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n6-control"')"
+FIELD3_N6="$(printf '%s\n' "$LINE_N6" | awk -F '\t' '{print $3}')"
+NCOLS_N6="$(printf '%s\n' "$LINE_N6" | awk -F '\t' '{print NF}')"
+EXPECT_N6="タスク 本文 続き [31m"
+if [ "$FIELD3_N6" = "$EXPECT_N6" ]; then
+  PASS=$(( PASS + 1 ))
+else
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-48: TAB/CR/ESC無害化後の値が期待と一致しない（期待: ${EXPECT_N6} / 実測: ${FIELD3_N6}）"
+fi
+if [ "$NCOLS_N6" -eq 4 ]; then
+  PASS=$(( PASS + 1 ))
+else
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-48: TAB混入行が4列のままでない（実測: ${NCOLS_N6}列）"
+fi
+if printf '%s' "$OUTN_LIST" | contains_raw_esc; then
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-48: --list出力に生のESCバイトが残っている"
+else
+  PASS=$(( PASS + 1 ))
+fi
+
+# AC-49: status: completed のノートは Tasks 節があっても --list にも
+# --once にも一切現れない（既存のstatus絞り込みがFR-31導出後も効くこと）。
+assert_not_contains "AC-49: completedノートは--listに現れない" "$OUTN_LIST" "proj-n7-completed"
+assert_not_contains "AC-49: completedノートのタスク本文も--listに現れない" "$OUTN_LIST" "completedなので出ないはず"
+OUTN7_ONCE="$(printf '%s\n' "$OUTN_ONCE")"
+assert_not_contains "AC-49: completedノートは--onceにも現れない" "$OUTN7_ONCE" "completedなので出ないはず"
+
+# AC-50: --list の全行が4列で、N-0（updated新しい）がN-8（updated古い）
+# より前に並ぶ（updated降順）。
+assert_order "AC-50: N-0がN-8よりupdated降順で前に並ぶ" "$OUTN_LIST" "proj-n0-base" "proj-n8-older"
+BAD_NCOLS_ROWS="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' 'NF && NF!=4' | wc -l | tr -d ' ')"
+if [ "$BAD_NCOLS_ROWS" -eq 0 ]; then
+  PASS=$(( PASS + 1 ))
+else
+  FAIL=$(( FAIL + 1 ))
+  echo "FAIL: AC-50/FR-44 ④: --list に4列でない行が${BAD_NCOLS_ROWS}件ある"
+fi
+
+# AC-34: N系（--list・--once）実行を通してcmuxスタブが1度も呼ばれない
+# （cmux-next-watch.shはcmuxバイナリを呼ばない設計。呼ばれていればFR-31の
+# 導出処理か周辺の変更がcmuxへ書込系コマンドを送っている恐れがある）。
+CMUX_CALLS_N="$(wc -l < "$CMUX_CALL_LOG_N" | tr -d ' ')"
+assert_true "AC-34: N系fixture実行（--list/--once）でcmuxが1度も呼ばれない" \
+  "$([ "$CMUX_CALLS_N" -eq 0 ] && echo 1 || echo 0)"
 
 echo
 echo "=== 結果: PASS=$PASS FAIL=$FAIL ==="

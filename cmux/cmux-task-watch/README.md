@@ -1,0 +1,160 @@
+# cmux-task-watch
+
+cmux Dock の4枠目「Next Task」に、フォーカス中のワークスペースへ**宣言した
+プロジェクト**の Tasks 節（`## Tasks` → `### <版名>` → チェックリスト）を
+表示する常駐スクリプト（`cmux-task-watch.sh`）と、その宣言を管理する CLI
+（`cmux-task-declare.sh`）のペア。表示は専用で、Vault にも cmux にも書き込
+まない。
+
+同じ `cmux/` 配下の共有 lib（`lib-dock-view.sh`・`lib-vault-tasks.sh`）に
+依存する。実体のディレクトリ（`~/work/dotfiles/cmux/`）が壊れていたり
+symlink 経由で lib が見つからないときは、理由を1行出して終了コード1で
+止まる（機能を欠いたまま無言では起動しない）。
+
+dock.json への登録・`~/work/tools/` の symlink 作成はこのツールの範囲外
+（リーダーが別途行う）。
+
+## 表示例
+
+実作業中の版がある場合:
+
+```
+▶ cmux-session-todo  v2 1/3
+v1 ✅ 3/3
+v2 ▶ 1/3
+ ├ [x] 要件定義
+ ├ [/] 設計
+ └ [ ] 実装
+v3 ・ 0/4
+```
+
+`[/]` がどの版にも無いとき（先頭の未完版を展開）:
+
+```
+・ cmux-session-todo  次: v2 0/3
+v1 ✅ 3/3
+v2 ・ 0/3
+ ├ [ ] 要件定義
+ ├ [ ] 設計
+ └ [ ] 実装
+v3 ・ 0/4
+```
+
+全版が完了しているとき（どの版も展開しない）:
+
+```
+✅ cmux-session-todo  全版完了 3/3
+v1 ✅ 3/3
+v2 ✅ 3/3
+v3 ✅ 4/4
+```
+
+宣言が無い・ノートが読めない等の場合は、原因が分かる理由行を1行だけ出す
+（`cmux 応答なし`・`対象不明`・`宣言記録破損`・`未宣言`・`Vault 不在`・
+`ノート不在`・`ノート破損`・`Tasks 節なし`・`タスクなし`・`空タスク`）。
+
+## 使い方
+
+1. セッションが始まり、最初の依頼からプロジェクトが確定した時点で、作業
+   ペインから1回だけ宣言を実行する（フック化されていない。毎回手で呼ぶ）。
+
+   ```
+   ~/work/tools/cmux-task-watch/cmux-task-declare.sh set <slug>
+   ```
+
+   `<slug>` は `<Vault>/Projects/<slug>.md` のファイル名（拡張子なし）。
+   英数字・`.`・`_`・`-` のみで、`.`／`..` そのものは使えない。
+
+2. 以降、そのセッションでは呼び直さない。プロジェクトを取り違えていたと
+   きだけ `set` を再実行して入れ替える（同じワークスペースへ再度 `set`
+   すると、宣言が新しい slug に入れ替わる）。
+
+3. セッションを閉じても宣言は残る。溜まった消滅ワークスペースの掃除は、
+   通常は週次メンテが実施する（毎週月曜 03:00）。手で `prune` を叩くのは、
+   長期にわたって未実施が続いたとき（cmux 未起動の週が重なった等）だけの
+   補助手段。
+
+   ```
+   ~/work/tools/cmux-task-watch/cmux-task-declare.sh prune
+   ```
+
+4. 全体像を腰を据えて見たいときは、Dock ではなくワークスペース内のペイン
+   で開く。
+
+   ```
+   cmux markdown open ~/Data/obsidian/Projects/<slug>.md
+   ```
+
+## cmux-task-declare.sh の使い方
+
+```
+cmux-task-declare.sh set   <slug> [--workspace <uuid|ref|index>]
+cmux-task-declare.sh unset          [--workspace <uuid|ref|index>]
+cmux-task-declare.sh list
+cmux-task-declare.sh prune
+```
+
+- 対象ワークスペースの既定は「自分がいるワークスペース」（`cmux identify`
+  の呼び出し元）。Dock の裏ワークスペースのように既定で解決できない場合は
+  `--workspace` で明示する。
+- `set` は「する」と「変える」の両方を担う。同じワークスペースに再度 `set`
+  すると slug が入れ替わる。
+- 拒否条件: ①slug が英数字・`.`・`_`・`-` 以外を含む、または空／`.`／`..`
+  ②対応するノート（`<Vault>/Projects/<slug>.md`）が存在しない。いずれも
+  拒否時は記録を1バイトも変更しない。
+- `unset` は宣言の記録だけを消す。Vault にも cmux にも触れない。未宣言の
+  ワークスペースに対して呼んでも何もせず成功する（冪等）。
+- `list` は `<UUID><TAB><slug>` の TSV を UUID の昇順で出す。
+- `prune` は `workspace list`（全ウィンドウ）の取得に完全に成功したときだ
+  け、消滅したワークスペース（記録にあるが `workspace list` に無い UUID）
+  の宣言を消す。取得に失敗したら1件も消さない。消した対を
+  `<UUID><TAB><slug>` で標準出力へ出す。
+- 記録が壊れている（JSON として不正・空・JSON 文が複数連結）ときは、
+  `set`／`unset`／`prune` のいずれも記録を書き換えず非0で終了する。復旧は
+  人が記録ファイルを直すか消すかしてから再実行する。
+- 終了コードは全体で5値: `0`＝成功／`1`＝接続不可（ワークスペース一覧の取
+  得に失敗）／`2`＝宣言記録が破損／`3`＝内部エラー（書込・原子的置換の失
+  敗）／`4`＝拒否（`set` の拒否条件のみが返す。`unset`／`list`／`prune` は
+  `4` を返さない）。`prune` が使うのは `0`〜`3` の4値のみで、`set` はこれ
+  に専用の `4` を加えた5値を返す。
+
+## 環境変数
+
+### 利用者向け（3つ）
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `CMUX_TASK_INTERVAL` | 60 | Vault 再読込の間隔（秒）。空・非数字・0 は既定へ戻す |
+| `CMUX_TASK_VAULT` | `$HOME/Data/obsidian` | Vault ルート |
+| `CMUX_TASK_STATE` | `$HOME/.config/cmux-task-watch/workspaces.json` | 宣言記録ファイル |
+
+### テスト・実験用の上書き口
+
+| 環境変数 | 既定 | 意味 |
+|---|---|---|
+| `CMUX_TASK_FOCUS_INTERVAL` | 2 | フォーカス監視の間隔（秒）。1以上かつ `CMUX_TASK_INTERVAL` 以下に丸める |
+| `CMUX_TASK_COLS` / `CMUX_TASK_ROWS` | 未設定（`stty` 実測） | 端末寸法の強制上書き |
+| `CMUX_TASK_CMUX_BIN` | `cmux`（PATH 解決） | cmux 実体の差し替え口 |
+| `CMUX_TASK_CALL_TIMEOUT` | 5 | cmux 呼び出し1回のタイムアウト（秒）。空・非数字・0 は既定へ戻す |
+| `CMUX_TASK_REDRAW_HEARTBEAT` | 600 | 同一フレームでも強制再描画する間隔（秒）。空・非数字・0 は既定へ戻す |
+
+`CMUX_TASK_VAULT`・`CMUX_TASK_STATE`・`CMUX_TASK_CMUX_BIN` は
+`cmux-task-declare.sh` も共有する。
+
+## 起動契約（cmux-task-watch.sh）
+
+| 引数 | 意味 |
+|---|---|
+| （なし） | 常駐。OSC 2 でペインタイトルを「Next Task」と名乗り、ループする |
+| `--once` | 1フレームを色付きで出して終了（終了コード0） |
+| `--plain` | 1フレームを平文（ESC無し）で出して終了。`--once` と併用可・単独でも1回で終わる |
+
+## テスト
+
+```
+bash tests/test-cmux-task-watch.sh
+bash tests/test-cmux-task-declare.sh
+```
+
+実 Vault・実ワークスペース・実 cmux には一切触れない（cmux は `$WORKDIR`
+配下のスタブへ差し替える）。

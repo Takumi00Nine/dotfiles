@@ -14,6 +14,19 @@
 #   棚卸し 要確認15件 (8/5)
 #   週次 ✅8/5
 
+# 共有 lib（幅・切り詰め・サニタイズ・frontmatter/Tasks節パーサ）を読み込む。
+# symlink（~/work/tools/cmux-next-watch/…）経由で起動されても cd -P で物理
+# パスへ解決するため、常に ~/work/dotfiles/cmux/ 配下の実体を見つける
+# （cmux-session-todo 設計 §1.2）。lib が見つからないときは理由を1行出して
+# 終了コード1とし、機能を欠いたまま無言で起動しない（同 §1.2）。
+LIB_DIR="$(cd -P "$(dirname "$0")" && pwd)/.."
+if [ ! -r "$LIB_DIR/lib-dock-view.sh" ] || [ ! -r "$LIB_DIR/lib-vault-tasks.sh" ]; then
+  echo "cmux-next-watch: 共有ライブラリが見つかりません（$LIB_DIR/lib-dock-view.sh ・ $LIB_DIR/lib-vault-tasks.sh）" >&2
+  exit 1
+fi
+. "$LIB_DIR/lib-dock-view.sh"
+. "$LIB_DIR/lib-vault-tasks.sh"
+
 VAULT="${CMUX_NEXT_VAULT:-$HOME/Data/obsidian}"
 INTERVAL="${CMUX_NEXT_INTERVAL:-60}"
 # status 語彙は4値統一（active/paused/completed/closed＝Vault Decisions/
@@ -48,47 +61,11 @@ WARN_C="${ESC}[38;5;214m"
 WARN_BOLD="${ESC}[38;5;214;1m"
 ERR_C="${ESC}[38;5;197m"
 
-is_number() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
-
-# jq 抽出用の共通サニタイズフィルタ：cmux-feed-watch.sh と同じくコード
-# ポイント単位で C0/C1 制御文字・DEL を空白化する（Vault ノートの next 値・
-# ファイル名は任意文字列が端末に生で流れるため、エスケープシーケンス注入
-# （ESC・CSI・OSC 等）をここで遮断する）。
-# -Rr（行単位）ではなく -Rs（全入力を1つの文字列として slurp）を使う：
-# ファイル名に万一 LF/TAB 等の制御文字が混入していても、行単位ではなく全体
-# を1文字列として gsub することで確実に空白化する（Codexレビュー指摘・Major
-# 対応）。入力は herestring ではなく printf|パイプで渡す（herestring は末尾
-# に改行を1つ付与するため、slurpモードだとそれも文字列に含まれてしまい出力
-# 末尾に余分な空白が付くため）。
-sanitize_str() {
-  printf '%s' "$1" | jq -Rsr 'gsub("[\u0001-\u001f\u007f-\u009f]"; " ")' 2>/dev/null
-}
-
-# 現在の端末幅（取得できなければ 40 桁固定＝Dockペインの想定幅）。
-# cmux-feed-watch.sh の cols_now() と同一実装（/dev/tty を明示して制御端末へ
-# 直接問い合わせる。パイプ経由の標準出力/標準エラー経由だと誤って80桁に
-# フォールバックしてしまうことを実機確認済みのため）。
-cols_now() {
-  local sz c
-  sz=$( { stty size </dev/tty; } 2>/dev/null )
-  c="${sz#* }"
-  is_number "$c" || c=40
-  printf '%s' "$c"
-}
-
-# 現在の端末の表示行数。CMUX_NEXT_ROWS（検証・強制上書き用）が有効数値なら
-# それを優先。取得できなければ 0（=クランプ無効）を返す。
-rows_now() {
-  local sz r
-  if is_number "${CMUX_NEXT_ROWS:-}" && [ "${CMUX_NEXT_ROWS}" -gt 0 ]; then
-    printf '%s' "$CMUX_NEXT_ROWS"
-    return
-  fi
-  sz=$( { stty size </dev/tty; } 2>/dev/null )
-  r="${sz%% *}"
-  is_number "$r" || r=0
-  printf '%s' "$r"
-}
+# is_number / sanitize_str は lib-dock-view.sh から供する（挙動不変・設計
+# §1.4）。cols_now / rows_now は lib の term_cols / term_rows への互換ラッパ
+# として残す（既存の呼び出し箇所を書き換えないため・設計 §1.4）。
+cols_now() { term_cols ""; }
+rows_now() { term_rows "${CMUX_NEXT_ROWS:-}"; }
 
 # コードポイント数ベースで幅 $2 に切り詰め、超過分は … を付ける
 # （cmux-feed-watch.sh の truncate_str と同一実装）。
@@ -99,85 +76,9 @@ truncate_str() {
   jq -Rr --argjson w "$w" 'if (length) > $w then (.[0:($w-1)] + "…") else . end' <<<"$s" 2>/dev/null
 }
 
-# 表示幅（端末セル数）ベースで幅 $2 に切り詰め、超過分は … を付ける。
-# 日本語・CJK・かな・全角記号・絵文字は2セル幅として数える（コードポイント
-# 数ベースの truncate_str だと日本語27文字＝54セルが40桁ペインを素通りして
-# 行が折り返す実害があった＝2026-08-05 本人報告）。幅判定は East Asian Width
-# の主要レンジの近似（Hangul Jamo・CJK統合漢字周辺・ハングル・互換漢字・
-# 全角形・絵文字ブロック・拡張漢字面）。
-truncate_disp() {
-  local s="$1" w="$2"
-  is_number "$w" || w=40
-  [ "$w" -lt 1 ] && w=1
-  # jq は16進数リテラル非対応のため10進で書く（4352=U+1100, 4447=U+115F,
-  # 11904=U+2E80, 42191=U+A4CF, 44032=U+AC00, 55203=U+D7A3, 63744=U+F900,
-  # 64255=U+FAFF, 65072=U+FE30, 65103=U+FE4F, 65280=U+FF00, 65376=U+FF60,
-  # 65504=U+FFE0, 65510=U+FFE6, 127744=U+1F300, 129791=U+1FAFF, 131072=U+20000）
-  jq -Rr --argjson w "$w" '
-    def cw: if . >= 4352 and ((. <= 4447)
-      or (. >= 11904 and . <= 42191)
-      or (. >= 44032 and . <= 55203)
-      or (. >= 63744 and . <= 64255)
-      or (. >= 65072 and . <= 65103)
-      or (. >= 65280 and . <= 65376)
-      or (. >= 65504 and . <= 65510)
-      or (. >= 127744 and . <= 129791)
-      or (. >= 131072)) then 2 else 1 end;
-    (explode) as $cs
-    | ($cs | map(cw)) as $ws
-    | (reduce $ws[] as $x (0; . + $x)) as $total
-    | if $total <= $w then .
-      else
-        (reduce range(0; $cs | length) as $i ({acc: 0, n: 0, stop: false};
-          if .stop then .
-          elif .acc + $ws[$i] <= ($w - 1) then {acc: (.acc + $ws[$i]), n: ($i + 1), stop: false}
-          else {acc: .acc, n: .n, stop: true} end)) as $st
-        | ($cs[0:$st.n] | implode) + "…"
-      end' <<<"$s" 2>/dev/null
-}
-
-# コードポイント数ベースで幅 $2 に切り詰め（…は付けない・プロジェクト名の
-# 固定幅ラベル用）。
-truncate_plain() {
-  local s="$1" w="$2"
-  is_number "$w" || w=10
-  [ "$w" -lt 0 ] && w=0
-  jq -Rr --argjson w "$w" '.[0:$w]' <<<"$s" 2>/dev/null
-}
-
-# frontmatter ブロック（先頭行が "---" である場合の、1つ目と2つ目の "---"
-# 行に挟まれた行）だけを抽出する。1行目が "---" でなければ何も出さない
-# （本文中の next: 等を誤検出しないため、フェンス内のみに厳密に限定する）。
-# 閉じフェンスが60行以内に見つからない場合は、それまでに読んだ行を「本文の
-# 誤検出」として一切使わず、非0で終了する（found フラグ・Codexレビュー指摘・
-# Major対応: 元実装は60行打ち切り時も exit ステータス0で終了し、本文の一部を
-# frontmatter として誤って採用してしまっていた）。呼び出し側は終了ステータス
-# を必ず確認すること（$(...) は失敗時も直前まで出力した行を返してしまう
-# ため、空文字列チェックだけでは不十分）。
-fm_extract() {
-  local f="$1"
-  awk '
-    NR==1 { if ($0 != "---") { exit 1 } ; next }
-    /^---$/ { found=1; exit 0 }
-    NR>60 { exit 1 }
-    { print }
-    END { if (!found) exit 1 }
-  ' "$f" 2>/dev/null
-}
-
-# frontmatter ブロック文字列 $1 から key "$2" の値を1つ取り出す（複数行
-# キーの2件目以降は無視・grep -m1）。前後空白・前後が揃った引用符（"…" /
-# '…'）を剥がす。
-fm_field() {
-  local block="$1" key="$2" raw val
-  raw="$(printf '%s\n' "$block" | grep -m1 "^${key}:" | sed -E "s/^${key}:[[:space:]]*//; s/[[:space:]]+\$//")"
-  val="$raw"
-  case "$val" in
-    \"*\") val="${val#\"}"; val="${val%\"}" ;;
-    \'*\') val="${val#\'}"; val="${val%\'}" ;;
-  esac
-  printf '%s' "$val"
-}
+# truncate_disp / truncate_plain / fm_extract / fm_field は lib から供する
+# （名前・引数とも不変。fm_extract のみ stdin 版になったため、呼び出し
+# 箇所を fm_extract <"$f" の形に直した＝設計 §1.4・§5.3）。
 
 # status が許可リスト（カンマ区切り）に含まれるか判定する。
 status_allowed() {
@@ -206,19 +107,35 @@ is_valid_date() {
   [ "$normalized" = "$1" ]
 }
 
+# frontmatter の next: が無い／空文字列のノートについて、同じノートの
+# Tasks 節（lib-vault-tasks.sh の read_note 経由）から先頭未完タスク（状態が
+# x でない最初のタスク。[/] を優先しない・記載順のまま）の本文を取り出す
+# （FR-31・設計 §7）。Tasks 節が無い・未完タスクが無い・ノートが破損して
+# いるときは何も出さず非0で返る（呼び出し側は従来どおり空のまま扱い、
+# 表示側で (next未設定) になる）。ファイルの存在確認は呼び出し側
+# （collect_entries）が既に済ませている（lib の契約＝設計 §1.4）。
+derive_next_from_tasks() {
+  local f="$1" ts
+  ts="$(read_note "$f" 2>/dev/null)" || return 1
+  printf '%s\n' "$ts" | awk -F '\t' '
+    $1 == "T" && $2 != "x" { print $3; found = 1; exit }
+    END { if (!found) exit 1 }
+  '
+}
+
 # セクション1: Projects/*.md の frontmatter を走査し、status をグループ判定
 # （A=稼働中＝進行系 / H=保留＝on-hold 系。completed/closed/status無しは対象外）。
 # "グループ<TAB>sortkey<TAB>名前<TAB>next値" を A→H・各グループ内は更新日降順で
 # 標準出力へ並べる（表示と --list の共通データ源）。mktemp 失敗時は非0。
 collect_entries() {
   local projects_dir="$VAULT/Projects" f base fm status nextval
-  local tmpfile sortkey grp
+  local tmpfile sortkey grp derived
 
   tmpfile="$(mktemp "${TMPDIR:-/tmp}/cmux-next-watch.XXXXXX" 2>/dev/null)"
   [ -n "$tmpfile" ] || return 1
   for f in "$projects_dir"/*.md; do
     [ -e "$f" ] || continue
-    fm="$(fm_extract "$f")" || continue
+    fm="$(fm_extract <"$f")" || continue
     [ -z "$fm" ] && continue
     status="$(fm_field "$fm" status)"
     if status_allowed "$status" "$STATUS_ALLOW"; then
@@ -234,6 +151,17 @@ collect_entries() {
     # 境界そのものが壊れてしまう（Codexレビュー指摘・Major対応）。
     base="$(sanitize_str "$(basename "$f" .md)")"
     nextval="$(sanitize_str "$(fm_field "$fm" next)")"
+    # FR-31: 手書きの next: が無い／空文字列のときだけ Tasks 節から導出する。
+    # 導出値は15コードポイントに切り詰め（省略記号は付けない＝
+    # truncate_plain）てからサニタイズする。read_note 内部の sanitize_lines
+    # で既に制御文字は空白化済みだが、sanitize_str を通す位置は既存の
+    # next: 値と揃え、二重に通しても無害（設計 §7）。
+    if [ -z "$nextval" ]; then
+      derived="$(derive_next_from_tasks "$f")"
+      if [ -n "$derived" ]; then
+        nextval="$(sanitize_str "$(truncate_plain "$derived" 15)")"
+      fi
+    fi
     sortkey="$(fm_field "$fm" updated)"
     is_valid_date "$sortkey" || sortkey="$(fm_field "$fm" date)"
     is_valid_date "$sortkey" || sortkey="0000-00-00"
