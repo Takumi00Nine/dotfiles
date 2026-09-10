@@ -19,7 +19,7 @@ Environment: macOS (Apple Silicon)
 dotfiles/
 ├── cmux/                          cmux (AI-terminal multiplexer) integration
 │   ├── cmux.json                  cmux app config: notification filtering
-│   ├── dock.json                  Dock pane definitions: Usage / Next / System (Usage's script lives in the sibling claude-codex-usage repo)
+│   ├── dock.json                  Dock pane definitions: Usage / Next Project / Next Task / System (Usage's script lives in the sibling claude-codex-usage repo)
 │   ├── claude-cmux-hooks.json     Claude Code hooks (turn-completion notify, feed log, etc.), injected via --settings
 │   ├── claude-teams-launch.sh     Launches cmux + starts/attaches the Agent Teams "Supervisor" workspace
 │   ├── claude-teams-entry.sh      Session picker (new vs. resume) invoked by claude-teams-launch.sh
@@ -79,6 +79,7 @@ Usage-tracking (`claude-cache.json`/`codex-cache.json`, the refresh LaunchAgent,
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
 | `cmux/cmux-next-watch/` | `~/work/tools/cmux-next-watch` | symlink (directory; `dock.json`'s "Next" pane points here) |
+| `cmux/cmux-task-watch/` | `~/work/tools/cmux-task-watch` | symlink (directory; `dock.json`'s Next Task pane points here). ⚠️ `install.sh` has no support for this yet — create it by hand with `ln -sfn` (2026-09-10) |
 | `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | generated (template with `__DOTFILES_HOME__` filled in) + `launchctl` (re)load, unless `SKIP_LAUNCHCTL=1` |
 | `zsh/aliases.zsh` | end of `~/.zshrc` | **idempotent append** of a source line, not a symlink (see below) |
 
@@ -172,7 +173,7 @@ AI 作業（Claude Code / Codex）まわりの macOS 設定ファイル集。
 dotfiles/
 ├── cmux/                          cmux（AI端末マルチプレクサ）統合
 │   ├── cmux.json                  cmuxアプリ設定: 通知フィルタ
-│   ├── dock.json                  Dockペイン定義: Usage / Next / System（Usageのスクリプトは別リポジトリclaude-codex-usage側）
+│   ├── dock.json                  Dockペイン定義: Usage / Next Project / Next Task / System（Usageのスクリプトは別リポジトリclaude-codex-usage側）
 │   ├── claude-cmux-hooks.json     Claude Code フック（ターン完了通知・feedログ等）。--settingsで注入
 │   ├── claude-teams-launch.sh     cmuxを起動しAgent Teamsの「Supervisor」ワークスペースを開始/復帰
 │   ├── claude-teams-entry.sh      claude-teams-launch.shから呼ばれるセッション選択（新規/再開）
@@ -232,6 +233,7 @@ dotfiles/
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
 | `cmux/cmux-next-watch/` | `~/work/tools/cmux-next-watch` | symlink（ディレクトリ。`dock.json`の「Next」ペインがこのパスを参照）|
+| `cmux/cmux-task-watch/` | `~/work/tools/cmux-task-watch` | symlink（ディレクトリ。`dock.json`のNext Taskペインがこのパスを参照）。⚠️ `install.sh` は未対応＝手動で `ln -sfn` する（2026-09-10）|
 | `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | 生成（`__DOTFILES_HOME__`をテンプレート展開）＋`launchctl`で(再)登録。`SKIP_LAUNCHCTL=1`で登録のみskip |
 | `zsh/aliases.zsh` | `~/.zshrc` 末尾 | **冪等追記**（symlinkではない。後述）|
 
