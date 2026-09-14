@@ -103,7 +103,7 @@ avatar-switch- 配布方式のたたき台を書く
 ./cmux-next-watch.sh
 
 # AI/スクリプト用: 表示と同じ順序で「番号<TAB>正式プロジェクト名<TAB>next値
-# <TAB>区分（稼働中/保留）」の4列を色なしで出力。ユーザーの「Nextの2番」等の
+# <TAB>区分（稼働中/保留）」の4列を色なしで出力。ユーザーの「Project の 2 番」等の
 # 参照はこれで解決する（正本）。
 ./cmux-next-watch.sh --list
 ```

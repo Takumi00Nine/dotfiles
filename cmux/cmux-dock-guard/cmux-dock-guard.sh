@@ -1,5 +1,5 @@
 #!/bin/bash
-# cmux Dock（dock.json に定義された Dock コントロール。現行 4＝Usage／Next Project／Next Task／System）が壊れたまま放置されるのを防ぐ
+# cmux Dock（dock.json に定義された Dock コントロール。現行 4＝Usage／Project／Task／System）が壊れたまま放置されるのを防ぐ
 # 常駐修復ツール。cmux 0.64系の既知仕様（dock.json は初回シード専用で、
 # Dock コマンドが死ぬと対話シェルに降格しても再シードされない。上流
 # https://github.com/manaflow-ai/cmux/issues/2544 未解決）に対する回避策。
@@ -17,7 +17,7 @@
 # WatchPaths の多重発火や暴走を防ぐ。通知は出さない（📣は本人呼び出し専用運用）。
 # 本ガードはcmux起動時に1回だけ評価する設計のため、起動後にDockペインを本人が
 # 手動で閉じてもそのセッション中は再介入しない（次にcmuxを再起動した時に、
-# その時点でのDock状態を評価して、dock.jsonに定義されたDockコントロール（現行4＝Usage／Next Project／Next Task／System）を常設インフラとして復元する。判定基準（title・プロセス生存）もdock.json由来）。
+# その時点でのDock状態を評価して、dock.jsonに定義されたDockコントロール（現行4＝Usage／Project／Task／System）を常設インフラとして復元する。判定基準（title・プロセス生存）もdock.json由来）。
 # cmux呼び出しは個別にタイムアウトさせ（cmux_run）、スクリプト全体にも
 # ウォッチドッグを仕込む。launchdは同一Labelのジョブを多重起動しないため、
 # どこか1箇所がハングすると以後永久に発火しなくなるのを防ぐため。
@@ -215,8 +215,9 @@ EOF
 # dock_healthy: 次の両方が揃って初めて健全とみなす。
 #   1. title判定: dock.jsonの各controlのtitleが、いずれかの[dock:global]
 #      サーフェスのtitleとして観測できる（ペインが無い＝閉じられている場合も
-#      当然不一致になり劣化として扱われる。本人決定2026-08-07: Usage/Next/
-#      Systemは常設インフラ扱いで、セッション中に手動で閉じられていても
+#      当然不一致になり劣化として扱われる。本人決定2026-08-07:
+#      Usage/Project/Task/Systemは常設インフラ扱いで、セッション中に
+#      手動で閉じられていても
 #      cmux再起動時には必ず復活させる）。
 #   2. プロセス判定（dock_processes_alive）: 対応するプロセスが実際に生きて
 #      いる。titleだけでは拾えない「セッション継続中の降格」を拾うため。

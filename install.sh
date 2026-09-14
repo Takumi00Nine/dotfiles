@@ -171,8 +171,8 @@ link ghostty/config              "$HOME/.config/ghostty/config"
 link ghostty/start-tmux.sh           "$HOME/.config/ghostty/start-tmux.sh"
 link ghostty/cmux-session-cleanup.sh "$HOME/.config/ghostty/cmux-session-cleanup.sh"
 link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
-# cmux 本体設定・ドック定義・Next ペイン表示ツール（2026-08-06 追加。
-# cmux.json=通知フィルタ等 / dock.json=Usage・Next・System の3コントロール /
+# cmux 本体設定・ドック定義・Project ペイン表示ツール（2026-08-06 追加。
+# cmux.json=通知フィルタ等 / dock.json=Usage・Project・Task・System の4コントロール /
 # cmux-next-watch=dock.json から起動される表示スクリプト。tools/ 側の参照
 # パス互換のため ~/work/tools/cmux-next-watch にも symlink を張る。Usage
 # コントロールが読む cmux-usage-watch.sh は claude-codex-usage リポジトリ

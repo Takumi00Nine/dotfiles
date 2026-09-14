@@ -8,12 +8,12 @@
     },
     {
       "id": "next",
-      "title": "Next Project",
+      "title": "Project",
       "command": "$HOME/work/tools/cmux-next-watch/cmux-next-watch.sh"
     },
     {
       "id": "task",
-      "title": "Next Task",
+      "title": "Task",
       "command": "$HOME/work/tools/cmux-task-watch/cmux-task-watch.sh"
     },
     {

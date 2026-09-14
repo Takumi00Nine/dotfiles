@@ -1,5 +1,5 @@
 #!/bin/bash
-# Next Task の宣言 CLI（cmux-session-todo 設計 §3.3）。
+# Task の宣言 CLI（cmux-session-todo 設計 §3.3）。
 # ワークスペース（安定識別子＝UUID）とプロジェクト slug の対を
 # ~/.config/cmux-task-watch/workspaces.json（既定）へ記録する。
 #
@@ -22,8 +22,14 @@ if [ ! -r "$LIB_DIR/lib-dock-view.sh" ]; then
   echo "lib-dock-view.sh が見つかりません: $LIB_DIR/lib-dock-view.sh" >&2
   exit 1
 fi
+if [ ! -r "$LIB_DIR/lib-cmux-workspace.sh" ]; then
+  echo "lib-cmux-workspace.sh が見つかりません: $LIB_DIR/lib-cmux-workspace.sh" >&2
+  exit 1
+fi
 # shellcheck source=../lib-dock-view.sh
 . "$LIB_DIR/lib-dock-view.sh"
+# shellcheck source=../lib-cmux-workspace.sh
+. "$LIB_DIR/lib-cmux-workspace.sh"
 
 VAULT="${CMUX_TASK_VAULT:-$HOME/Data/obsidian}"
 STATE_FILE="${CMUX_TASK_STATE:-$HOME/.config/cmux-task-watch/workspaces.json}"
@@ -80,46 +86,23 @@ read_state_json() {
   fi
 }
 
-# 現ウィンドウの workspace list（--json）を1回取得する。失敗したら非0。
-fetch_workspace_list() {
-  run_with_timeout "$CALL_TIMEOUT" "$CMUX_BIN" --json workspace list
-}
-
-# $1（uuid|ref|index）を workspace list から UUID へ解決する。
-# 解決できなければ非0（出力なし）。
+# $1（uuid|ref|index）を workspace list から UUID へ解決する（薄いラッパ。
+# 本体は共有 lib の ws_resolve_uuid＝設計 §21）。解決できなければ非0
+# （出力なし）。rc=1（取得失敗）／rc=2（見つからない）のどちらでも、
+# 呼び出し側（resolve_target）は0／非0しか見ないので挙動は変わらない。
 resolve_workspace_uuid() {
-  local val="$1" raw uuid
-  raw="$(fetch_workspace_list)" || return 1
-  uuid="$(printf '%s' "$raw" | jq -r --arg v "$val" '
-    (.workspaces // []) as $ws
-    | (($ws[] | select(.id == $v) | .id) // ($ws[] | select(.ref == $v) | .id) // empty)
-  ' 2>/dev/null | head -n1)"
-  if [ -z "$uuid" ]; then
-    case "$val" in
-      ''|*[!0-9]*) : ;;
-      *)
-        # 実 cmux の workspace list の .index は 0 始まりであり配列位置とは
-        # 限らない（実査: `cmux --json workspace list` の .index=0）。配列位置
-        # ではなく .index フィールドを一意キーとして照合する（verifier実装
-        # レビュー2巡目 #9・MAJOR）。
-        uuid="$(printf '%s' "$raw" | jq -r --argjson i "$val" '
-          (.workspaces // []) | map(select(.index == $i)) | .[0].id // empty
-        ' 2>/dev/null)"
-        ;;
-    esac
-  fi
-  [ -n "$uuid" ] || return 1
+  local val="$1" uuid
+  uuid="$(ws_resolve_uuid "$CMUX_BIN" "$CALL_TIMEOUT" "$val")" || return 1
   printf '%s' "$uuid"
 }
 
-# 既定対象＝ cmux identify の caller.workspace_ref を workspace list で UUID
-# へ解決する。caller が取れない／workspace list に無ければ非0。
+# 既定対象＝自分がいるワークスペース（caller）の UUID（薄いラッパ。本体は
+# 共有 lib の ws_caller_uuid＝設計 §21）。caller が取れない／workspace list
+# に無ければ非0。
 default_target_uuid() {
-  local raw caller_ref
-  raw="$(run_with_timeout "$CALL_TIMEOUT" "$CMUX_BIN" --json identify)" || return 1
-  caller_ref="$(printf '%s' "$raw" | jq -r '.caller.workspace_ref // empty' 2>/dev/null)"
-  [ -n "$caller_ref" ] || return 1
-  resolve_workspace_uuid "$caller_ref"
+  local uuid
+  uuid="$(ws_caller_uuid "$CMUX_BIN" "$CALL_TIMEOUT")" || return 1
+  printf '%s' "$uuid"
 }
 
 # --workspace <val> があればそれを解決し、無ければ既定（caller）を解決する。

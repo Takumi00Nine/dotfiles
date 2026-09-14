@@ -406,7 +406,7 @@ compose_frame() {
 main() {
   if [ "${1:-}" = "--list" ]; then
     # AI/スクリプト用: 表示と同じ順序で「番号<TAB>正式プロジェクト名<TAB>next値
-    # <TAB>区分（稼働中/保留）」を色なしで出力する。「Nextの2番」等の参照を
+    # <TAB>区分（稼働中/保留）」を色なしで出力する。「Project の 2 番」等の参照を
     # AI が解決するための正本。
     if ! command -v jq >/dev/null 2>&1; then
       printf 'ERR: jq not found\n' >&2
@@ -425,7 +425,7 @@ main() {
   # ペインのタイトルを名乗る（OSC 2）。手動起動したペインが「Terminal」の
   # ままで他ドック（Usage/System）と区別できない問題への対処（2026-08-05
   # 本人要望）。dock.json 起動時は title 指定と重複するが実害はない。
-  printf '\033]2;Next Project\007'
+  printf '\033]2;Project\007'
   printf '\033[?25l'
   # どの経路で終了しても同期出力モード解除とカーソル表示を復帰させる
   # （?2026h の直後に割り込まれてもモードが端末に残らないように）

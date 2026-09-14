@@ -350,7 +350,7 @@ echo "=== (d) title一致でもプロセスが死んでいれば劣化として�
 }
 
 echo "=== (e) Dockペインが存在しない(タイトルが全く現れない)場合も修復対象 ==="
-# 本人決定(2026-08-07): Usage/Next/Systemは常設インフラ扱い。セッション中に
+# 本人決定(2026-08-07): Usage/Project/Task/Systemは常設インフラ扱い。セッション中に
 # 手動で閉じられていても、cmux再起動時のチェックでは必ず復活させる。
 {
   STUB_BIN="$WORKDIR/e/bin"; STUB_DIR="$WORKDIR/e/stub"; STATE_DIR="$WORKDIR/e/state"; DOCK_JSON="$WORKDIR/e/dock.json"

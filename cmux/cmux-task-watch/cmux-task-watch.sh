@@ -1,20 +1,23 @@
 #!/bin/bash
-# cmux Dock 4枠目「Next Task」の描画（cmux-session-todo 設計 §4）。表示専用
+# cmux Dock 4枠目「Task」の描画（cmux-session-todo 設計 §4）。表示専用
 # （Vault にも cmux にも書き込まない＝FR-23）。フォーカス中のワークスペース
 # の宣言先プロジェクト（cmux-task-declare.sh set で宣言）の Tasks 節を、
 # ヘッダー行＋版行＋展開対象の版の子行として表示する（FR-21）。
 #
-# 表示例:
+# 表示例（子行の番号はその瞬間の表示順であって恒久IDではない＝設計
+# §19.1・FR-49）:
 #   ▶ cmux-session-todo  v2 1/3
 #   v1 ✅ 3/3
 #   v2 ▶ 1/3
-#    ├ [x] 要件定義
-#    ├ [/] 設計
-#    └ [ ] 実装
+#    ├ 1 [x] 要件定義
+#    ├ 2 [/] 設計
+#    └ 3 [ ] 実装
 #   v3 ・ 0/4
 #
 # 引数: （なし）＝常駐 / --once＝1フレーム色付きで出して終了 / --plain＝1フレーム
-# 平文で出して終了（--once と併用可・単独でも1回で終わる＝設計 §4.1）。
+# 平文で出して終了（--once と併用可・単独でも1回で終わる＝設計 §4.1）/
+# --list＝展開対象の版の子行を4列TSV（番号・版名・状態・本文）で出す
+# （--once・--plain とは併用しない＝設計 §20）。
 #
 # bash 3.2 互換（macOS標準bash）。連想配列・mapfileは使わない。
 
@@ -29,10 +32,16 @@ if [ ! -r "$LIB_DIR/lib-vault-tasks.sh" ]; then
   echo "lib-vault-tasks.sh が見つかりません: $LIB_DIR/lib-vault-tasks.sh" >&2
   exit 1
 fi
+if [ ! -r "$LIB_DIR/lib-cmux-workspace.sh" ]; then
+  echo "lib-cmux-workspace.sh が見つかりません: $LIB_DIR/lib-cmux-workspace.sh" >&2
+  exit 1
+fi
 # shellcheck source=../lib-dock-view.sh
 . "$LIB_DIR/lib-dock-view.sh"
 # shellcheck source=../lib-vault-tasks.sh
 . "$LIB_DIR/lib-vault-tasks.sh"
+# shellcheck source=../lib-cmux-workspace.sh
+. "$LIB_DIR/lib-cmux-workspace.sh"
 
 # --- 設定（利用者向け3つ＋テスト・実験用の上書き口＝設計 §4.1・§13 D-1） ---
 VAULT="${CMUX_TASK_VAULT:-$HOME/Data/obsidian}"
@@ -59,6 +68,8 @@ DEFAULT_C="${ESC}[38;5;252m"
 # モデル系グローバルは起動時に空へ初期化しておく。
 CMUX_REASON=""
 CMUX_UUID=""
+LIST_REASON=""
+LIST_UUID=""
 MODEL_REASON=""
 MODEL_SLUG=""
 MODEL_SYM=""
@@ -67,6 +78,9 @@ MODEL_VERNAME=""
 MODEL_FRAC=""
 V_NAME=(); V_TOTAL=(); V_DONE=(); V_HASSLASH=()
 BL_KIND=(); BL_A=(); BL_B=(); BL_C=()
+# 表示番号の正本（number_rows() の出力・設計 §19.1）。BL_BLIDX は BL_KIND
+# 上の位置（記載順の子行だけを指す）。
+NR_BLIDX=(); NR_NUM=(); NR_STATE=(); NR_BODY=()
 
 # --- 記録ファイル（読むだけ・書かない） ---------------------------------
 
@@ -106,33 +120,125 @@ slug_valid() {
   return 0
 }
 
+# 入力の署名（設計 §19.4・FR-50b）。宣言記録の内容ハッシュ・解決した slug・
+# ノートの内容ハッシュの3要素を毎ティック取り直す純関数（cmux を呼ばない）。
+# cksum は「CRC 長さ ファイル名」を返すので、ファイル名の列を落として
+# CRC と長さだけを署名に入れる（ファイル名が変わっただけでは再読込しない
+# ため。slug の変化は署名の第2要素が拾う＝I2-13）。
+#   $1 = uuid
+# stdout（rc=0のときだけ意味を持つ）: "<state_h><TAB><slug><TAB><note_h>"
+#   各要素はファイル不在なら固定文字列 "-"
+# rc=0: 3要素とも取得できた（cksum 対象ファイルが存在すれば成功、
+#       存在しなければ "-" で確定＝どちらも失敗ではない）
+# rc=1: 存在するファイルに対する cksum が失敗した（値は不定・呼び出し側は
+#       出力を使わず、無条件で再読込・前回署名未更新とすること＝I2-13）
+compute_signature() {
+  local uuid="$1" state_h slug note_h h rc
+
+  if [ -f "$STATE_FILE" ]; then
+    h="$(cksum "$STATE_FILE" 2>/dev/null)"; rc=$?
+    [ "$rc" -eq 0 ] || return 1
+    state_h="$(printf '%s' "$h" | awk '{print $1, $2}')"
+  else
+    state_h="-"
+  fi
+
+  # 毎ティック lookup＝意図的（署名の取りこぼしを原理的に無くす・I2-15b は不採用）。
+  slug="$(lookup_slug "$uuid")"
+  [ -n "$slug" ] || slug="-"
+
+  note_h="-"
+  if [ "$slug" != "-" ] && slug_valid "$slug" && [ -d "$VAULT" ]; then
+    local note="$VAULT/Projects/$slug.md"
+    if [ -f "$note" ]; then
+      h="$(cksum "$note" 2>/dev/null)"; rc=$?
+      [ "$rc" -eq 0 ] || return 1
+      note_h="$(printf '%s' "$h" | awk '{print $1, $2}')"
+    fi
+  fi
+
+  printf '%s\t%s\t%s' "$state_h" "$slug" "$note_h"
+}
+
 # --- cmux 側（段A・毎ティック評価） ---------------------------------------
 
-# cmux identify / workspace list を1回ずつ呼び、フォーカス中ワークスペース
-# の UUID を解決する。成功時は CMUX_UUID に UUID を、失敗時は CMUX_REASON に
-# §7 順1・順2 の理由行を入れる（両方成功かつ解決できたときは CMUX_REASON=""）。
+# フォーカス中ワークスペースの UUID を解決する（薄いラッパ。段階評価の
+# 本体は共有 lib＝設計 §21 の I2-15）。成功時は CMUX_UUID に UUID を、
+# 失敗時は CMUX_REASON に §7 順1・順2 の理由行を入れる（両方成功かつ
+# 解決できたときは CMUX_REASON=""）。
 probe_focus_uuid() {
-  local ident_raw ident_rc wslist_raw wslist_rc focus_ref
+  local refs focus_ref json
   CMUX_REASON=""
   CMUX_UUID=""
 
-  ident_raw="$(run_with_timeout "$CALL_TIMEOUT" "$CMUX_BIN" --json identify 2>/dev/null)"
-  ident_rc=$?
-  wslist_raw="$(run_with_timeout "$CALL_TIMEOUT" "$CMUX_BIN" --json workspace list 2>/dev/null)"
-  wslist_rc=$?
+  refs="$(ws_identify_refs "$CMUX_BIN" "$CALL_TIMEOUT")"
+  if [ $? -ne 0 ]; then
+    CMUX_REASON="cmux 応答なし"
+    return
+  fi
+  # タブ区切りの分解はパラメータ展開で行う（"IFS=タブ read" だと先頭の
+  # 空フィールド＝caller が null のときに読み飛ばされる罠があるため。
+  # ws_caller_uuid のコメントと同じ理由＝設計 §21）。
+  focus_ref="${refs#*$'\t'}"
 
-  if [ "$ident_rc" -ne 0 ] || [ "$wslist_rc" -ne 0 ]; then
+  json="$(ws_list_json "$CMUX_BIN" "$CALL_TIMEOUT")"
+  if [ $? -ne 0 ]; then
     CMUX_REASON="cmux 応答なし"
     return
   fi
 
-  focus_ref="$(printf '%s' "$ident_raw" | jq -r '.focused.workspace_ref // empty' 2>/dev/null)"
-  CMUX_UUID="$(printf '%s' "$wslist_raw" | jq -r --arg r "$focus_ref" '
-    (.workspaces // [])[] | select(.ref == $r) | .id
-  ' 2>/dev/null | head -n1)"
-  if [ -z "$CMUX_UUID" ]; then
+  CMUX_UUID="$(ws_uuid_for_ref "$json" "$focus_ref")"
+  if [ $? -ne 0 ]; then
+    CMUX_UUID=""
     CMUX_REASON="対象不明"
   fi
+}
+
+# --list の対象解決（設計 §20.2・§21）。ws_caller_uuid は使わず、同じ素材
+# （identify1回・workspace list1回）から caller と focused の両方を
+# ws_uuid_for_ref で解決し、両者（解決後のUUID同士）が一致するときだけ
+# caller の UUID を返す（FR-53b）。成功時は LIST_UUID に UUID を、失敗時は
+# LIST_REASON に理由をセットする（LIST_UUID は空のまま）。
+#
+# ⚠️ 呼び出し側はこの関数を裸の文として呼ぶこと（"$(probe_list_target)" の
+# ようにコマンド置換で包まない）。包むと関数全体がサブシェルで走り、
+# LIST_REASON/LIST_UUID への代入が呼び出し元へ伝わらない（bash3.2の既知の
+# 罠＝probe_focus_uuid/CMUX_REASON/CMUX_UUID と同じ形に揃える）。
+probe_list_target() {
+  local refs caller_ref focus_ref json cu fu
+  LIST_REASON=""
+  LIST_UUID=""
+
+  refs="$(ws_identify_refs "$CMUX_BIN" "$CALL_TIMEOUT")"
+  if [ $? -ne 0 ]; then
+    LIST_REASON="cmux 応答なし"
+    return
+  fi
+  # タブ区切りの分解はパラメータ展開で行う（probe_focus_uuid・
+  # ws_caller_uuid と同じ理由＝先頭の空フィールドが読み飛ばされる罠を
+  # 避けるため）。
+  caller_ref="${refs%%$'\t'*}"
+  focus_ref="${refs#*$'\t'}"
+
+  json="$(ws_list_json "$CMUX_BIN" "$CALL_TIMEOUT")"
+  if [ $? -ne 0 ]; then
+    LIST_REASON="cmux 応答なし"
+    return
+  fi
+
+  cu="$(ws_uuid_for_ref "$json" "$caller_ref")"
+  if [ $? -ne 0 ]; then
+    LIST_REASON="対象不明"
+    return
+  fi
+
+  fu="$(ws_uuid_for_ref "$json" "$focus_ref")"
+  if [ $? -ne 0 ] || [ "$cu" != "$fu" ]; then
+    LIST_REASON="対象不一致"
+    return
+  fi
+
+  LIST_UUID="$cu"
 }
 
 # --- Vault 側（段B・再読込のときだけ評価＝順3〜順10） ---------------------
@@ -154,6 +260,7 @@ load_model() {
   MODEL_FRAC=""
   V_NAME=(); V_TOTAL=(); V_DONE=(); V_HASSLASH=()
   BL_KIND=(); BL_A=(); BL_B=(); BL_C=()
+  NR_BLIDX=(); NR_NUM=(); NR_STATE=(); NR_BODY=()
 
   if state_is_corrupt; then
     MODEL_REASON="宣言記録破損"
@@ -314,6 +421,30 @@ TSV_EOF
       done
     fi
   done
+
+  number_rows
+}
+
+# 表示番号の正本（C-1の変更・設計 §19.1）。BL_KIND/BL_A/BL_B（load_model が
+# 組み立てた版行＋展開対象版の子行・記載順）を読み、展開対象版の子行
+# （CX/CS/CB）だけに記載順で1から番号を振る。並列配列
+# NR_BLIDX（BL_KIND上の位置）/NR_NUM/NR_STATE/NR_BODY を設定する。
+# render も --list もこの関数が返した配列を読むだけで、自分では数えない
+# （N-1）。純関数（副作用は上記グローバルの設定のみ・BL_* は変更しない）。
+number_rows() {
+  NR_BLIDX=(); NR_NUM=(); NR_STATE=(); NR_BODY=()
+  local n=${#BL_KIND[@]} i num=0
+  for ((i = 0; i < n; i++)); do
+    case "${BL_KIND[$i]}" in
+      CX|CS|CB)
+        num=$(( num + 1 ))
+        NR_BLIDX+=("$i")
+        NR_NUM+=("$num")
+        NR_STATE+=("${BL_A[$i]}")
+        NR_BODY+=("${BL_B[$i]}")
+        ;;
+    esac
+  done
 }
 
 # --- 描画パイプライン（C-1・§6） -----------------------------------------
@@ -388,11 +519,13 @@ render_version_line() {
   printf '%s%s' "$vername_disp" "$fixed"
 }
 
-# 子行を組み立てる（FR-29。固定部=" {罫線} [{state}] "・本文だけを切り詰める）。
+# 子行を組み立てる（FR-51。固定部=" {罫線} {番号} [{state}] "・本文だけを
+# 切り詰める。番号は number_rows() が採番し右詰め済みの文字列を受け取る＝
+# ここでは切り捨てない）。
 render_child_line() {
-  local arrow="$1" state="$2" body="$3" cols="$4"
+  local arrow="$1" num="$2" state="$3" body="$4" cols="$5"
   local fixed w_fixed avail body_disp
-  fixed=" ${arrow} [${state}] "
+  fixed=" ${arrow} ${num} [${state}] "
   if [ "$cols" -le 0 ]; then
     printf '%s%s' "$fixed" "$body"
     return
@@ -539,6 +672,14 @@ render() {
     esac
   done
 
+  # 番号の桁数（設計 §19.2・I2-2）: number_rows() が返した行数（クランプ
+  # 「前」の子行総数）から取る。KEEP_IDX の長さから取らない（クランプの
+  # 有無で行頭が動かないようにするため＝AC-63）。
+  local child_n="${#NR_NUM[@]}" digits
+  digits="${#child_n}"
+  [ "$digits" -lt 1 ] && digits=1
+
+  local nr_ptr=0
   for ((p = 0; p < keep_n; p++)); do
     idx="${KEEP_IDX[$p]}"
     local kind="${BL_KIND[$idx]}" a="${BL_A[$idx]}" b="${BL_B[$idx]}" c="${BL_C[$idx]}"
@@ -548,9 +689,18 @@ render() {
         OUT_COLOR+=("$(color_for_sym "$a")")
         ;;
       CX|CS|CB)
+        # NR_BLIDX は BL_KIND の子行位置を記載順（＝idx の昇順）に持つ。
+        # KEEP_IDX も昇順（clamp_lines が sort -n 済み）なので、ポインタを
+        # 前へ進めるだけで対応する番号へ到達できる（設計 §19.1）。
+        while [ "$nr_ptr" -lt "${#NR_BLIDX[@]}" ] && [ "${NR_BLIDX[$nr_ptr]}" -ne "$idx" ]; do
+          nr_ptr=$(( nr_ptr + 1 ))
+        done
+        local num_disp
+        num_disp="$(printf '%*d' "$digits" "${NR_NUM[$nr_ptr]}")"
+        nr_ptr=$(( nr_ptr + 1 ))
         local arrow="├"
         [ "$p" -eq "$last_child_pos" ] && arrow="└"
-        OUT_LINES+=("$(render_child_line "$arrow" "$a" "$b" "$cols")")
+        OUT_LINES+=("$(render_child_line "$arrow" "$num_disp" "$a" "$b" "$cols")")
         OUT_COLOR+=("$(color_for_state "$a")")
         ;;
     esac
@@ -641,7 +791,7 @@ run_once() {
 }
 
 run_daemon() {
-  printf '\033]2;Next Task\007'
+  printf '\033]2;Task\007'
   printf '\033[?25l'
   trap 'printf "\033[?2026l\033[?25h"' EXIT
   trap 'exit 0' INT TERM HUP
@@ -650,6 +800,7 @@ run_daemon() {
 
   local last_uuid="" last_frame="" last_reload=0 last_redraw=0
   local last_was_reason=0
+  local last_signature=""
   printf '\033[2J'
 
   while :; do
@@ -662,11 +813,24 @@ run_daemon() {
       MODEL_REASON=""
       MODEL_SLUG=""
       BL_KIND=(); BL_A=(); BL_B=(); BL_C=()
+      NR_BLIDX=(); NR_NUM=(); NR_STATE=(); NR_BODY=()
       last_uuid=""
+      last_signature=""
       last_was_reason=1
     else
-      local need_reload=0
+      local need_reload=0 sig="" sig_rc=0
+      sig="$(compute_signature "$CMUX_UUID")"
+      sig_rc=$?
+
+      # 署名の取得に1つでも失敗したティックは、理由を問わず無条件で
+      # 再読込する（設計 §19.4・I2-13）。失敗を "-" という値として前回
+      # 署名に書き込むと、失敗が続く間の宣言変更を取りこぼす（検証5巡目
+      # #3）ため、last_signature は sig_rc=0 のときだけ更新する。
       if [ "$CMUX_UUID" != "$last_uuid" ]; then
+        need_reload=1
+      elif [ "$sig_rc" -ne 0 ]; then
+        need_reload=1
+      elif [ "$sig" != "$last_signature" ]; then
         need_reload=1
       elif [ $(( now - last_reload )) -ge "$INTERVAL" ]; then
         need_reload=1
@@ -679,6 +843,7 @@ run_daemon() {
         load_model "$CMUX_UUID"
         last_reload="$now"
         last_uuid="$CMUX_UUID"
+        [ "$sig_rc" -eq 0 ] && last_signature="$sig"
         if [ -n "$MODEL_REASON" ]; then
           last_was_reason=1
         else
@@ -703,17 +868,71 @@ run_daemon() {
   done
 }
 
+# `--list`（C-1 の新サブコマンド・設計 §20）。常駐に依存せず単発で完結する
+# （--once と同じ。v2.4 の描画スナップショット方式の撤回）。
+# 対象は caller。caller と focused が一致するときだけ4列TSVを出す
+# （FR-53b）。stdout: 成功時のみ4列TSVを1行以上。失敗時は0バイト。
+# stderr: 失敗時のみ理由1行。rc: 成功0／失敗1（§20.3）。
+run_list() {
+  probe_list_target
+  if [ -z "$LIST_UUID" ]; then
+    echo "${LIST_REASON:-対象不明}" >&2
+    return 1
+  fi
+
+  load_model "$LIST_UUID"
+  if [ -n "$MODEL_REASON" ]; then
+    echo "$MODEL_REASON" >&2
+    return 1
+  fi
+
+  local n=${#NR_NUM[@]}
+  if [ "$n" -eq 0 ]; then
+    # 展開対象の版が無い＝全版完了（§20.3 の#11）。MODEL_REASON は立たない
+    # （render は通常フレームとして扱う）ので、ここで別に検出する。
+    echo "全版完了" >&2
+    return 1
+  fi
+
+  local i
+  for ((i = 0; i < n; i++)); do
+    printf '%s\t%s\t[%s]\t%s\n' "${NR_NUM[$i]}" "$MODEL_VERNAME" "${NR_STATE[$i]}" "${NR_BODY[$i]}"
+  done
+  return 0
+}
+
+usage() {
+  cat >&2 <<'EOF'
+使い方:
+  cmux-task-watch.sh [--once] [--plain]
+  cmux-task-watch.sh --list
+EOF
+}
+
 main() {
   command -v jq >/dev/null 2>&1 || { echo "jq が見つかりません。" >&2; exit 1; }
 
-  local once=0 plain=0 a
+  local once=0 plain=0 list=0 a
   for a in "$@"; do
     case "$a" in
       --once) once=1 ;;
       --plain) plain=1; once=1 ;;
-      *) : ;;
+      --list) list=1 ;;
+      *) usage; exit 1 ;;
     esac
   done
+
+  # --list は --once / --plain と併用しない（設計 §20.4・FR-55）。未知の
+  # 引数と同じく、常駐へ落とさず即座に拒否する。
+  if [ "$list" -eq 1 ] && { [ "$once" -eq 1 ] || [ "$plain" -eq 1 ]; }; then
+    usage
+    exit 1
+  fi
+
+  if [ "$list" -eq 1 ]; then
+    run_list
+    exit $?
+  fi
 
   if [ "$once" -eq 1 ]; then
     run_once "$plain"

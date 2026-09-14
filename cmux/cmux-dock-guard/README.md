@@ -190,8 +190,8 @@ LaunchAgentの設置ロジック（テンプレート展開・`mkdir -p`・launc
   ERRORが出た場合は実際のDockの見た目も確認するのが確実。
 - `dock.json`の`command`が複雑なシェル一行（パイプ・複数コマンド等）の
   場合、プロセス判定は先頭トークンのbasenameしか見ないため、実際の生存
-  確認としては粗い近似になる。このリポジトリのdock.json（Usage/Next/
-  System、いずれも単一スクリプトパス）では問題にならない。
+  確認としては粗い近似になる。このリポジトリのdock.json（Usage/Project/Task/System、
+  いずれも単一スクリプトパス）では問題にならない。
 - `command`の実行ファイルが存在しない（`[ -x ]`で見えない）controlは
   プロセス判定から除外する。そうしないと、そのcontrolのスクリプトを
   導入していないマシン（例: `claude-codex-usage`リポジトリ未導入で

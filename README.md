@@ -19,7 +19,7 @@ Environment: macOS (Apple Silicon)
 dotfiles/
 ├── cmux/                          cmux (AI-terminal multiplexer) integration
 │   ├── cmux.json                  cmux app config: notification filtering
-│   ├── dock.json                  Dock pane definitions: Usage / Next Project / Next Task / System (Usage's script lives in the sibling claude-codex-usage repo)
+│   ├── dock.json                  Dock pane definitions: Usage / Project / Task / System (Usage's script lives in the sibling claude-codex-usage repo)
 │   ├── claude-cmux-hooks.json     Claude Code hooks (turn-completion notify, feed log, etc.), injected via --settings
 │   ├── claude-teams-launch.sh     Launches cmux + starts/attaches the Agent Teams "Supervisor" workspace
 │   ├── claude-teams-entry.sh      Session picker (new vs. resume) invoked by claude-teams-launch.sh
@@ -79,7 +79,7 @@ Usage-tracking (`claude-cache.json`/`codex-cache.json`, the refresh LaunchAgent,
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
 | `cmux/cmux-next-watch/` | `~/work/tools/cmux-next-watch` | symlink (directory; `dock.json`'s "Next" pane points here) |
-| `cmux/cmux-task-watch/` | `~/work/tools/cmux-task-watch` | symlink (directory; `dock.json`'s Next Task pane points here). ⚠️ `install.sh` has no support for this yet — create it by hand with `ln -sfn` (2026-09-10) |
+| `cmux/cmux-task-watch/` | `~/work/tools/cmux-task-watch` | symlink (directory; `dock.json`'s Task pane points here). ⚠️ `install.sh` has no support for this yet — create it by hand with `ln -sfn` (2026-09-10) |
 | `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | generated (template with `__DOTFILES_HOME__` filled in) + `launchctl` (re)load, unless `SKIP_LAUNCHCTL=1` |
 | `zsh/aliases.zsh` | end of `~/.zshrc` | **idempotent append** of a source line, not a symlink (see below) |
 
@@ -126,7 +126,7 @@ Hammerspoon configuration for controlling AI terminals with Keychron mouse butto
 - Ghostty does not support end-of-line comments (write comments on their own lines)
 
 ### cmux/
-Integration with the [`cmux`](https://cmux.com) terminal: notification filtering (`cmux.json`), three Dock status panes (Usage/Next/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Next pane's project/external-brain display. The Usage pane's rendering script and its refresh LaunchAgent live in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo. See [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) for the LaunchAgent that automatically repairs a degraded Dock after cmux relaunches.
+Integration with the [`cmux`](https://cmux.com) terminal: notification filtering (`cmux.json`), four Dock status panes (Usage/Project/Task/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Project pane's project/external-brain display. The Usage pane's rendering script and its refresh LaunchAgent live in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo. See [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) for the LaunchAgent that automatically repairs a degraded Dock after cmux relaunches.
 
 ### zsh/
 `cc` (`cd ~/Claude && claude`) and `cct` (`cd ~/Claude && cmux claude-teams ...`, with cmux notification-hook and `--teammate-mode in-process` injection unless the caller already passed one of those flags). See [zsh: append, not symlink](#zsh-append-not-symlink) above for how it gets wired into `~/.zshrc`.
@@ -173,7 +173,7 @@ AI 作業（Claude Code / Codex）まわりの macOS 設定ファイル集。
 dotfiles/
 ├── cmux/                          cmux（AI端末マルチプレクサ）統合
 │   ├── cmux.json                  cmuxアプリ設定: 通知フィルタ
-│   ├── dock.json                  Dockペイン定義: Usage / Next Project / Next Task / System（Usageのスクリプトは別リポジトリclaude-codex-usage側）
+│   ├── dock.json                  Dockペイン定義: Usage / Project / Task / System（Usageのスクリプトは別リポジトリclaude-codex-usage側）
 │   ├── claude-cmux-hooks.json     Claude Code フック（ターン完了通知・feedログ等）。--settingsで注入
 │   ├── claude-teams-launch.sh     cmuxを起動しAgent Teamsの「Supervisor」ワークスペースを開始/復帰
 │   ├── claude-teams-entry.sh      claude-teams-launch.shから呼ばれるセッション選択（新規/再開）
@@ -233,7 +233,7 @@ dotfiles/
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
 | `cmux/cmux-next-watch/` | `~/work/tools/cmux-next-watch` | symlink（ディレクトリ。`dock.json`の「Next」ペインがこのパスを参照）|
-| `cmux/cmux-task-watch/` | `~/work/tools/cmux-task-watch` | symlink（ディレクトリ。`dock.json`のNext Taskペインがこのパスを参照）。⚠️ `install.sh` は未対応＝手動で `ln -sfn` する（2026-09-10）|
+| `cmux/cmux-task-watch/` | `~/work/tools/cmux-task-watch` | symlink（ディレクトリ。`dock.json`のTaskペインがこのパスを参照）。⚠️ `install.sh` は未対応＝手動で `ln -sfn` する（2026-09-10）|
 | `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | 生成（`__DOTFILES_HOME__`をテンプレート展開）＋`launchctl`で(再)登録。`SKIP_LAUNCHCTL=1`で登録のみskip |
 | `zsh/aliases.zsh` | `~/.zshrc` 末尾 | **冪等追記**（symlinkではない。後述）|
 
@@ -280,7 +280,7 @@ Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。
 - ※ Ghostty は行末コメント非対応（コメントは独立行に書く）
 
 ### cmux/
-[`cmux`](https://cmux.com) ターミナルとの統合。通知フィルタ（`cmux.json`）、3つのDockステータスペイン（Usage/Next/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Nextペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプトと対応するrefresh用LaunchAgentは別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側にある。cmux再起動後にDockが壊れたままにならないよう自動修復するLaunchAgentの詳細は [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) 参照。
+[`cmux`](https://cmux.com) ターミナルとの統合。通知フィルタ（`cmux.json`）、4つのDockステータスペイン（Usage/Project/Task/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Projectペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプトと対応するrefresh用LaunchAgentは別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側にある。cmux再起動後にDockが壊れたままにならないよう自動修復するLaunchAgentの詳細は [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) 参照。
 
 ### zsh/
 `cc`（`cd ~/Claude && claude`）と `cct`（`cd ~/Claude && cmux claude-teams ...`。呼び出し側が該当フラグを渡していなければcmux通知フックと`--teammate-mode in-process`を注入）を定義。`~/.zshrc` への配線方式は上の[「zsh: symlinkではなく追記」](#zsh-symlinkではなく追記)参照。
