@@ -123,21 +123,6 @@ term_rows() {
   printf '%s' "$r"
 }
 
-# $1 を無害化する。既存 cmux-next-watch.sh の sanitize_str と同一挙動
-# （gsub 版・jq -Rs）。互換のため挙動を変えない（設計 §1.4）。
-sanitize_str() {
-  printf '%s' "$1" | jq -Rsr 'gsub("[\u0001-\u001f\u007f-\u009f]"; " ")' 2>/dev/null
-}
-
-# stdin の各行を無害化して stdout へ出す。U+0000〜U+001F と U+007F〜U+009F
-# を U+0020 へ置換する（U+0000 を含む）。-Rr（行単位）の explode/implode
-# 版なので行構造を保つ（設計 §5.1）。jq が非0で終わったら非0を返す。
-sanitize_lines() {
-  jq -Rr '
-    [explode[] | if (. <= 31) or (. >= 127 and . <= 159) then 32 else . end] | implode
-  ' 2>/dev/null
-}
-
 # $1 を数値とみなし、空・非数字・0 なら $2（既定値）を返す。
 sanitize_interval() {
   local v="$1" default="$2"

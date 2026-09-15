@@ -5,6 +5,10 @@
 # 実 ~/.zshrc には一切依存しない。HOME はテストごとに使い捨てのFAKE_HOMEへ
 # 差し替える。
 #
+# ⚠️ install.sh を呼ぶときは SKIP_LAUNCHCTL=1 が必須（design §33.4）。
+# 無いと実ユーザの launchd（gui/501/com.takumi009.cmux-dock-guard）へ
+# bootout/bootstrap を実際に試みる（検証3巡目 #35 と同じ経路）。
+#
 # 実行方法: bash tests/test-zsh-aliases-source.sh
 
 set -euo pipefail
@@ -41,11 +45,11 @@ MARKER="# dotfiles-managed"
 
 echo "=== (a) 初回実行でsource行が1行入る ==="
 {
-  FAKE_HOME="$(mktemp -d)"
+  FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
   printf '# 既存の.zshrc\nexport FOO=bar\n' > "$FAKE_HOME/.zshrc"
 
   rc=0
-  out=$(HOME="$FAKE_HOME" bash "$INSTALL_SH" 2>&1) || rc=$?
+  out=$(HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 LAUNCHCTL_TIMEOUT_SECS=1 bash "$INSTALL_SH" 2>&1) || rc=$?
   ZSHRC="$FAKE_HOME/.zshrc"
   COUNT="$(grep -cF "$MARKER" "$ZSHRC" || true)"
 
@@ -61,16 +65,16 @@ echo "=== (a) 初回実行でsource行が1行入る ==="
 
 echo "=== (b) 3回連続実行しても1行のまま（冪等） ==="
 {
-  FAKE_HOME="$(mktemp -d)"
+  FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
   printf '# 既存の.zshrc\n' > "$FAKE_HOME/.zshrc"
 
   for i in 1 2 3; do
-    HOME="$FAKE_HOME" bash "$INSTALL_SH" >/dev/null 2>&1
+    HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 LAUNCHCTL_TIMEOUT_SECS=1 bash "$INSTALL_SH" >/dev/null 2>&1
   done
   COUNT="$(grep -cF "$MARKER" "$FAKE_HOME/.zshrc" || true)"
   assert_eq "3回実行しても目印付きsource行は1行のまま" "1" "$COUNT"
 
-  out3=$(HOME="$FAKE_HOME" bash "$INSTALL_SH" 2>&1)
+  out3=$(HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 LAUNCHCTL_TIMEOUT_SECS=1 bash "$INSTALL_SH" 2>&1)
   assert_true "4回目はskipメッセージが出る" \
     "$(echo "$out3" | grep -q 'skip: ~/.zshrcには既に' && echo 1 || echo 0)"
 
@@ -79,11 +83,11 @@ echo "=== (b) 3回連続実行しても1行のまま（冪等） ==="
 
 echo "=== (c) .zshrcが存在しない場合は新規作成される ==="
 {
-  FAKE_HOME="$(mktemp -d)"
+  FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
   # .zshrcを意図的に作らない
 
   rc=0
-  HOME="$FAKE_HOME" bash "$INSTALL_SH" >/dev/null 2>&1 || rc=$?
+  HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 LAUNCHCTL_TIMEOUT_SECS=1 bash "$INSTALL_SH" >/dev/null 2>&1 || rc=$?
   ZSHRC="$FAKE_HOME/.zshrc"
 
   assert_eq "install.sh自体はexit 0で完走する" "0" "$rc"
@@ -96,7 +100,7 @@ echo "=== (c) .zshrcが存在しない場合は新規作成される ==="
 
 echo "=== (d) 既存の.zshrc内容が変更・並べ替えされずに保全される ==="
 {
-  FAKE_HOME="$(mktemp -d)"
+  FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
   cat > "$FAKE_HOME/.zshrc" <<'EOF'
 # anyenv
 export PATH="$HOME/.anyenv/bin:$PATH"
@@ -106,7 +110,7 @@ alias ll='ls -la'
 EOF
   ORIG_HEAD="$(head -n 5 "$FAKE_HOME/.zshrc")"
 
-  HOME="$FAKE_HOME" bash "$INSTALL_SH" >/dev/null 2>&1
+  HOME="$FAKE_HOME" SKIP_LAUNCHCTL=1 LAUNCHCTL_TIMEOUT_SECS=1 bash "$INSTALL_SH" >/dev/null 2>&1
   NEW_HEAD="$(head -n 5 "$FAKE_HOME/.zshrc")"
 
   assert_eq "先頭5行(既存内容)が一切変更されない" "$ORIG_HEAD" "$NEW_HEAD"
@@ -139,7 +143,7 @@ run_cct_argv() {
 
 echo "=== (e) cct: --teammate-mode省略時は既定で --teammate-mode in-process が注入される ==="
 {
-  FAKE_HOME="$(mktemp -d)"
+  FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
   mkdir -p "$FAKE_HOME/Claude"
   STUBDIR="$(mktemp -d)"
   cat > "$STUBDIR/cmux" <<'EOF'
@@ -164,7 +168,7 @@ EOF
 
 echo "=== (f) cct: 呼び出し側が --teammate-mode を明示したら既定注入を譲る ==="
 {
-  FAKE_HOME="$(mktemp -d)"
+  FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
   mkdir -p "$FAKE_HOME/Claude"
   STUBDIR="$(mktemp -d)"
   cat > "$STUBDIR/cmux" <<'EOF'
@@ -187,7 +191,7 @@ EOF
 
 echo "=== (g) cct: -- 以降の引数は --teammate-mode に見えても明示指定と誤判定しない ==="
 {
-  FAKE_HOME="$(mktemp -d)"
+  FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
   mkdir -p "$FAKE_HOME/Claude"
   STUBDIR="$(mktemp -d)"
   cat > "$STUBDIR/cmux" <<'EOF'

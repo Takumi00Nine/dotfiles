@@ -101,39 +101,6 @@ else
   echo "SKIP: このホストでは /dev/tty が使えるため、stty失敗時のフォールバック既定値は確定検査できません（上書き経路のみ検査済み）"
 fi
 
-echo "=== sanitize_str（既存 cmux-next-watch.sh と同一挙動） ==="
-ESC=$'\x1b'
-TAB=$'\x09'
-DEL=$'\x7f'
-OUT_ESC="$(sanitize_str "a${ESC}b")"
-assert_true "ESC を含む文字列に真の ESC バイトが残らない" "$(printf '%s' "$OUT_ESC" | python3 -c 'import sys; d=sys.stdin.read(); print(1 if chr(27) not in d else 0)')"
-assert_eq "ESC は空白に置換される" "a b" "$OUT_ESC"
-OUT_TAB="$(sanitize_str "a${TAB}b")"
-assert_eq "TAB は空白に置換される" "a b" "$OUT_TAB"
-OUT_DEL="$(sanitize_str "a${DEL}b")"
-assert_eq "DEL(0x7f) は空白に置換される" "a b" "$OUT_DEL"
-
-echo "=== sanitize_lines（stdin/stdout・NUL/ESC/TAB/CSI を空白化・行構造を保つ） ==="
-# NUL は bash 変数に保持できず代入時点で切り詰まる（$'\x00' を変数へ入れて
-# 文字列連結する形は NUL が消えたまま「成立していないテスト」になる＝
-# verifier 実装レビュー1巡目 #7 指摘）。printf のフォーマット文字列に
-# \0（NUL）・\033（ESC・CSIの導入バイト）を直接埋め込み、変数を経由せず
-# ファイルへ書いてから sanitize_lines に食わせる。
-SANITIZE_LINES_IN="$WORKDIR/sanitize_lines_input.bin"
-printf 'line1\0NUL\033ESC\tTAB\033[31mCSI\nline2\n' > "$SANITIZE_LINES_IN"
-OUT_LINES="$(sanitize_lines < "$SANITIZE_LINES_IN")"
-RC_LINES=$?
-assert_eq "sanitize_lines は正常終了で終了コード0" "0" "$RC_LINES"
-NUL_GONE="$(printf '%s' "$OUT_LINES" | python3 -c 'import sys; d=sys.stdin.read(); print(1 if chr(0) not in d else 0)')"
-assert_true "出力にU+0000が残らない" "$NUL_GONE"
-ESC_GONE="$(printf '%s' "$OUT_LINES" | python3 -c 'import sys; d=sys.stdin.read(); print(1 if chr(27) not in d else 0)')"
-assert_true "出力にESCが残らない" "$ESC_GONE"
-TAB_GONE="$(printf '%s' "$OUT_LINES" | python3 -c 'import sys; d=sys.stdin.read(); print(1 if chr(9) not in d else 0)')"
-assert_true "出力にTABが残らない" "$TAB_GONE"
-LINE_COUNT="$(printf '%s\n' "$OUT_LINES" | wc -l | tr -d ' ')"
-assert_eq "2行入力は2行のまま（行構造を保つ）" "2" "$LINE_COUNT"
-assert_true "各行にNUL/ESC/TAB/CSI置換後の目印テキストが残る（脱落ではなく空白化）" "$(printf '%s' "$OUT_LINES" | grep -qF "NUL" && printf '%s' "$OUT_LINES" | grep -qF "line2" && echo 1 || echo 0)"
-
 echo "=== is_number（既存と同一） ==="
 assert_true "数字だけはtrue" "$(is_number "123" && echo 1 || echo 0)"
 assert_false "空文字はfalse" "$(is_number "" && echo 1 || echo 0)"
@@ -199,6 +166,10 @@ if [ -s "$HANG_PIDS" ]; then
   done < "$HANG_PIDS"
 fi
 assert_eq "子孫が残らない（記録した全PIDがkill -0に失敗する＝孤児ゼロ）" "0" "$orphan_count"
+
+echo "=== 縮小の確認（§31.5＝sanitize_str・sanitize_linesは描画側から削除済み） ==="
+assert_false "sanitize_str は削除済み（未定義）" "$(type sanitize_str >/dev/null 2>&1 && echo 1 || echo 0)"
+assert_false "sanitize_lines は削除済み（未定義）" "$(type sanitize_lines >/dev/null 2>&1 && echo 1 || echo 0)"
 
 echo
 echo "=== 結果: PASS=$PASS FAIL=$FAIL ==="

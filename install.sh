@@ -171,15 +171,15 @@ link ghostty/config              "$HOME/.config/ghostty/config"
 link ghostty/start-tmux.sh           "$HOME/.config/ghostty/start-tmux.sh"
 link ghostty/cmux-session-cleanup.sh "$HOME/.config/ghostty/cmux-session-cleanup.sh"
 link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
-# cmux 本体設定・ドック定義・Project ペイン表示ツール（2026-08-06 追加。
-# cmux.json=通知フィルタ等 / dock.json=Usage・Project・Task・System の4コントロール /
-# cmux-next-watch=dock.json から起動される表示スクリプト。tools/ 側の参照
-# パス互換のため ~/work/tools/cmux-next-watch にも symlink を張る。Usage
-# コントロールが読む cmux-usage-watch.sh は claude-codex-usage リポジトリ
-# 側へ移設済み（2026-08-07）で、dotfiles側はsymlinkしない）
+# cmux 本体設定・ドック定義（2026-08-06 追加。cmux.json=通知フィルタ等 /
+# dock.json=Usage・Project・Task・System の4コントロール。Project・Task の
+# 2枠は dock.json から dotfiles リポジトリ内の実体を直接指す＝v3で
+# ~/work/tools/ 経由の symlink を廃止した（cmux-session-todo設計§28.2・
+# FR-76）。Usage コントロールが読む cmux-usage-watch.sh は
+# claude-codex-usage リポジトリ側へ移設済み（2026-08-07）で、dotfiles側は
+# symlinkしない）
 link cmux/cmux.json                  "$HOME/.config/cmux/cmux.json"
 link cmux/dock.json                  "$HOME/.config/cmux/dock.json"
-link cmux/cmux-next-watch            "$HOME/work/tools/cmux-next-watch"
 chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh" "$DIR/cmux/cmux-next-watch/cmux-next-watch.sh" "$DIR/cmux/cmux-dock-guard/cmux-dock-guard.sh"
 
 append_zsh_aliases_source

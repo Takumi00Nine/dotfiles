@@ -9,12 +9,12 @@
     {
       "id": "next",
       "title": "Project",
-      "command": "$HOME/work/tools/cmux-next-watch/cmux-next-watch.sh"
+      "command": "$HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh"
     },
     {
       "id": "task",
       "title": "Task",
-      "command": "$HOME/work/tools/cmux-task-watch/cmux-task-watch.sh"
+      "command": "$HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh"
     },
     {
       "id": "system",

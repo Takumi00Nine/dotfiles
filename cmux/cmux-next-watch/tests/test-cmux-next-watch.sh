@@ -1,813 +1,373 @@
 #!/bin/bash
-# cmux-next-watch.sh のユニットテスト。tmp配下に fixture Vault を都度生成し、
-# --once モードの出力を検証する（実 Vault・実ログには一切依存しない）。
+# cmux-next-watch.sh のユニットテスト（cmux-session-todo 設計 v3・RP層）。
+# ai-env が1バイトも無い隔離環境でも通る（呼び出し口はP群スタブ・AC-107）。
 #
-# 実行方法: bash tests/test-cmux-next-watch.sh
+# 実行方法: bash cmux/cmux-next-watch/tests/test-cmux-next-watch.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TARGET="$SCRIPT_DIR/../cmux-next-watch.sh"
-# mktemp 失敗時は空文字列のまま処理を続けず即座に終了する（Codexレビュー
-# 指摘・Major対応: 失敗を無視すると WORKDIR が空になり、以降の
-# "$WORKDIR/vault1" 等の生成先がカレントディレクトリ直下の相対パスに化ける
-# 恐れがある）。
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/cmux-next-watch-test.XXXXXX")" || {
+CMUX_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WATCH="$SCRIPT_DIR/../cmux-next-watch.sh"
+STUBS="$CMUX_DIR/tests/lib-supply-stubs.sh"
+
+[ -r "$WATCH" ] || { echo "FATAL: 見つかりません: $WATCH" >&2; exit 1; }
+[ -r "$STUBS" ] || { echo "FATAL: 見つかりません: $STUBS" >&2; exit 1; }
+. "$CMUX_DIR/lib-dock-view.sh"
+. "$CMUX_DIR/lib-supply-frame.sh"
+. "$STUBS"
+
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/test-cmux-next-watch.XXXXXX")" || {
   echo "FATAL: mktemp -d に失敗しました" >&2
   exit 1
 }
-case "$WORKDIR" in
-  "${TMPDIR:-/tmp}"/cmux-next-watch-test.*) : ;;
-  *)
-    echo "FATAL: WORKDIRが想定外のパスです: $WORKDIR" >&2
-    exit 1
-    ;;
-esac
 trap 'rm -rf "$WORKDIR"' EXIT
 
 PASS=0
 FAIL=0
-
-# ANSIエスケープ（色コード）を取り除いたプレーンテキストを標準出力へ返す。
-strip_ansi() {
-  python3 -c "
-import re, sys
-esc = chr(27)
-pat = re.compile(esc + r'\[[0-9;]*m')
-sys.stdout.write(pat.sub('', sys.stdin.read()))
-"
-}
-
-# $1 に \033 のような実エスケープバイトがそのまま含まれているか判定する
-# （注入対策の検証用：無害化されていればこの関数は失敗＝真の ESC が無い）。
-contains_raw_esc() {
-  python3 -c "
-import sys
-data = sys.stdin.read()
-sys.exit(0 if chr(27) in data else 1)
-"
-}
-
-assert_contains() {
-  local desc="$1" haystack="$2" needle="$3"
-  if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+assert_eq() {
+  local desc="$1" expected="$2" actual="$3"
+  if [ "$expected" = "$actual" ]; then
     PASS=$(( PASS + 1 ))
   else
     FAIL=$(( FAIL + 1 ))
     echo "FAIL: $desc"
-    echo "  期待した文字列が見つかりません: $needle"
+    echo "  expected: [$expected]"
+    echo "  actual:   [$actual]"
   fi
 }
-
-assert_not_contains() {
-  local desc="$1" haystack="$2" needle="$3"
-  if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-    FAIL=$(( FAIL + 1 ))
-    echo "FAIL: $desc"
-    echo "  含まれてはいけない文字列が見つかりました: $needle"
-  else
-    PASS=$(( PASS + 1 ))
-  fi
-}
-
 assert_true() {
   local desc="$1" cond="$2"
-  if [ "$cond" = "1" ]; then
-    PASS=$(( PASS + 1 ))
-  else
-    FAIL=$(( FAIL + 1 ))
-    echo "FAIL: $desc"
-  fi
+  if [ "$cond" = "1" ]; then PASS=$(( PASS + 1 )); else FAIL=$(( FAIL + 1 )); echo "FAIL: $desc"; fi
 }
 
-# 行の並び順（配列的に渡した行番号順）を検証する。$1=プレーンテキスト全体、
-# 以降は「先に出現すべき順」の文字列。
-assert_order() {
-  local desc="$1" text="$2"; shift 2
-  local prev_line=-1 tok line ok=1
-  for tok in "$@"; do
-    line="$(printf '%s\n' "$text" | grep -n -F -- "$tok" | head -n1 | cut -d: -f1)"
-    if [ -z "$line" ]; then
-      ok=0
-      break
-    fi
-    if [ "$line" -le "$prev_line" ]; then
-      ok=0
-      break
-    fi
-    prev_line="$line"
+run_watch() {  # $1=supply-path 残り=引数
+  local supply="$1"; shift
+  CMUX_DOCK_SUPPLY_PROJECT="$supply" bash "$WATCH" "$@"
+}
+
+now_mono() { python3 -c 'import time; print(time.monotonic())'; }
+
+# $1=PID を上限秒(既定10秒)までポーリングで待ち、それでも生きていたら-9で
+# 強制終了する（テスト側の安全弁・検証1巡目 #14）。
+wait_pid_bounded() {
+  local pid="$1" limit="${2:-100}" waited=0
+  while [ "$waited" -lt "$limit" ]; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1; waited=$(( waited + 1 ))
   done
-  assert_true "$desc" "$ok"
+  kill -9 "-$pid" 2>/dev/null
+  kill -9 "$pid" 2>/dev/null
+  return 1
 }
 
-# fixture Vault 全体の内容ハッシュとmtimeのスナップショットを返す（AC-33用）。
-# 名前・秒単位mtime・サイズだけでは内容の書換えを検知できない（verifier実装
-# レビュー2巡目 #10・MAJOR対応）ため、内容ハッシュ（shasum -a 256）を各行へ
-# 追加する。test-cmux-task-watch.shのvault_snapshotと同じ設計だが、この
-# ファイルはfixtureごとに別ディレクトリのVaultを使うため引数でVaultパスを
-# 受け取る形にしてある。
-vault_snapshot() {
-  local vault="$1"
-  find "$vault" -type f -print 2>/dev/null | sort | while IFS= read -r f; do
-    printf '%s %s\n' \
-      "$(stat -f '%N %m %z' "$f" 2>/dev/null)" \
-      "$(shasum -a 256 "$f" 2>/dev/null | awk '{print $1}')"
-  done
-}
+# v3.5の Project 期待フレーム（10行・空行2行を含む）。
+EXPECT_P6="$(printf '▶ 稼働中 (2)\n5 svwb-pilot 実データ照合を回す\n6 takumi009- (next未設定)\n\n⏸ 保留 (1)\n7 avatar-swi 配布方式のたたき台を書く\n\n⚠ 外部脳\n棚卸し 要確認15件 (8/5)\n週次 ✅8/5')"
 
-# 1つの fixture Vault を組み立てる（複数テストで共用）。
-build_fixture_vault() {
-  local vault="$1"
-  mkdir -p "$vault/Projects"
+echo "=== AC-91: Project期待フレーム10行との完全一致（色なし比較） ==="
+mk_stub_P6_project "$WORKDIR/p6" 5 6 7
+OUT="$(CMUX_NEXT_ROWS=40 run_watch "$WORKDIR/p6" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+assert_eq "AC-91: --once の出力(色除去後)がv3.5の期待フレームと完全一致" "$EXPECT_P6" "$OUT"
+assert_eq "AC-91: 行数は10" "10" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
 
-  cat >"$vault/Projects/proj-active.md" <<'EOF'
----
-date: 2026-07-01
-updated: 2026-07-30
-status: active
-next: 実データ照合を回す
----
-# active
-EOF
-
-  cat >"$vault/Projects/proj-newer-noNext.md" <<'EOF'
----
-date: 2026-07-01
-updated: 2026-08-01
-status: active
----
-# next未設定のはず
-EOF
-
-  cat >"$vault/Projects/proj-excluded-status.md" <<'EOF'
----
-date: 2026-07-01
-status: completed
-next: これは出ないはず
----
-# 許可リスト外のstatusなので除外
-EOF
-
-  cat >"$vault/Projects/proj-nodate.md" <<'EOF'
----
-status: paused
-next: 日付なしプロジェクト
----
-# 保留グループ・updated/date どちらも無い（末尾の保留セクションに来るはず）
-EOF
-
-  cat >"$vault/Projects/proj-quoted.md" <<'EOF'
----
-date: 2026-07-01
-updated: 2026-08-02
-status: active
-next: "配布方式のたたき台を書く"
----
-# next値がダブルクォート付き
-EOF
-
-  cat >"$vault/Projects/README.md" <<'EOF'
-frontmatterが無いファイル（statusも無いので除外されるはず）
-EOF
-}
-
-echo "=== fixture: 基本Vault ==="
-V1="$WORKDIR/vault1"
-build_fixture_vault "$V1"
-OUT1="$(CMUX_NEXT_VAULT="$V1" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once)"
-PLAIN1="$(printf '%s' "$OUT1" | strip_ansi)"
-
-assert_contains "稼働中セクションに active の3件がカウントされる" "$PLAIN1" "▶ 稼働中 (3)"
-assert_contains "保留セクションに paused の1件がカウントされる" "$PLAIN1" "⏸ 保留 (1)"
-assert_not_contains "statusが対象外（completed）のノートのnextは出ない" "$PLAIN1" "これは出ないはず"
-assert_not_contains "README.md（frontmatterなし）は出ない" "$PLAIN1" "README"
-assert_contains "next未設定は (next未設定) と表示される" "$PLAIN1" "(next未設定)"
-assert_contains "next値のダブルクォートが剥がされる" "$PLAIN1" "配布方式のたたき台を書く"
-assert_not_contains "next値のダブルクォートそのものは残らない" "$PLAIN1" '"配布方式のたたき台を書く"'
-assert_order "updated（無ければdate）降順で並ぶ・未設定は最後" "$PLAIN1" \
-  "配布方式のたたき台を書く" "(next未設定)" "実データ照合を回す" "日付なしプロジェクト"
-assert_not_contains "棚卸し・週次どちらもデータ源が無ければ棚卸し行は出ない" "$PLAIN1" "棚卸し"
-assert_not_contains "週次メンテ状態ファイルが無い時はこの行を省略する" "$PLAIN1" "週次"
-assert_not_contains "外部脳データ源が両方無ければブロック（見出し含む）ごと非表示" "$PLAIN1" "外部脳"
-
-echo "=== fixture: 名前の10文字切り詰め（省略記号なし） ==="
-V2="$WORKDIR/vault2"
-mkdir -p "$V2/Projects"
-cat >"$V2/Projects/very-long-project-name-here.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-08-01
-status: active
-next: x
----
-EOF
-OUT2="$(CMUX_NEXT_VAULT="$V2" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "ファイル名は先頭10文字に切り詰められる" "$OUT2" "very-long-"
-assert_not_contains "11文字目以降は出ない" "$OUT2" "very-long-p"
-
-echo "=== fixture: エスケープシーケンス注入対策 ==="
-V3="$WORKDIR/vault3"
-mkdir -p "$V3/Projects"
-python3 - "$V3/Projects/proj-injection.md" <<'PYEOF'
+echo "=== AC-97: 外部脳ブロック ==="
+assert_true "AC-97①: ⚠はU+26A0単独（U+FE0Fを伴わない）" \
+  "$(printf '%s\n' "$OUT" | grep -F '⚠ 外部脳' | python3 -c "
 import sys
-esc = chr(27)
-content = "---\ndate: 2026-07-01\nupdated: 2026-08-03\nstatus: active\nnext: evil" + esc + "[31mRED" + esc + "[0m text\n---\n"
-with open(sys.argv[1], "w", encoding="utf-8") as fh:
-    fh.write(content)
-PYEOF
-RAW3="$(CMUX_NEXT_VAULT="$V3" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once)"
-# next値の行を抽出（自スクリプトが付与する色ANSIは残る想定なので全体からは
-# 判定できない。next値部分だけ見るため、色コードを除去したうえで
-# 元のESCバイトが1つも残っていないことを確認する）。
-PLAIN3="$(printf '%s' "$RAW3" | strip_ansi)"
-if printf '%s' "$PLAIN3" | contains_raw_esc; then
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: next値中のESCバイトが無害化されずに残っている"
-else
-  PASS=$(( PASS + 1 ))
-fi
-assert_contains "無害化後もテキスト自体は表示される" "$PLAIN3" "evil [31mRED [0m text"
+line = sys.stdin.readline()
+print(1 if '⚠' in line and '️' not in line else 0)
+")"
 
-echo "=== fixture: 端末幅での行全体の切り詰め ==="
-V4="$WORKDIR/vault4"
-mkdir -p "$V4/Projects"
-cat >"$V4/Projects/proj-overflow.md" <<'EOF'
----
-date: 2026-08-04
-updated: 2026-08-04
-status: active
-next: これは非常に長いnextテキストで端末幅を確実に超えるように書いています
----
-EOF
-OUT4="$(CMUX_NEXT_VAULT="$V4" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-LINE4="$(printf '%s\n' "$OUT4" | grep -E '^[0-9]+ proj-overf')"
-LEN4="$(python3 -c "import sys; print(len(sys.argv[1]))" "$LINE4")"
-if [ -n "$LINE4" ] && [ "$LEN4" -le 40 ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: 端末幅超過時に行が40コードポイント以内に切り詰められていない（実測: ${LEN4:-なし}）"
-fi
-assert_contains "切り詰め時は省略記号が付く" "$LINE4" "…"
-
-echo "=== fixture: 閉じフェンスが無い壊れたnoteは frontmatter を誤検出しない ==="
-V6="$WORKDIR/vault6"
-mkdir -p "$V6/Projects"
-# 冒頭は正しい "---" だが閉じフェンスが無いまま本文が続くファイル。本文中に
-# 偶然 status:/next: と読めてしまう行があっても、これはfrontmatterとして
-# 採用してはいけない（受入条件「本文中のnext:等を誤検出しない」の検証）。
-cat >"$V6/Projects/proj-no-closing-fence.md" <<'EOF'
----
-date: 2026-07-01
-本文がここから始まるが閉じフェンスが無い
-status: active
-next: 本文中の偽next（誤検出してはいけない）
-EOF
-OUT6B="$(CMUX_NEXT_VAULT="$V6" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "閉じフェンスが無いnoteはNext対象0件になる" "$OUT6B" "▶ 稼働中 (0)"
-assert_not_contains "本文中の偽next値は表示されない" "$OUT6B" "本文中の偽next"
-
-echo "=== fixture: frontmatterが無いnoteの本文中のstatus:/next:は誤検出しない ==="
-V7="$WORKDIR/vault7"
-mkdir -p "$V7/Projects"
-cat >"$V7/Projects/proj-no-frontmatter.md" <<'EOF'
-# frontmatterが全く無いノート
-status: active
-next: これも誤検出してはいけない
-EOF
-OUT7B="$(CMUX_NEXT_VAULT="$V7" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "frontmatterが無いnoteはNext対象0件になる" "$OUT7B" "▶ 稼働中 (0)"
-assert_not_contains "本文中のnext値は表示されない" "$OUT7B" "これも誤検出してはいけない"
-
-echo "=== fixture: 正常な閉じフェンス後、本文に別の---があっても誤検出しない ==="
-V8="$WORKDIR/vault8"
-mkdir -p "$V8/Projects"
-cat >"$V8/Projects/proj-extra-fence.md" <<'EOF'
----
-date: 2026-07-01
-updated: 2026-08-01
-status: active
-next: 正しいnext値
----
-# 本文
----
-next: 本文の水平線の後にある偽next（誤検出してはいけない）
-EOF
-OUT8B="$(CMUX_NEXT_VAULT="$V8" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "1つ目の閉じフェンス内のnext値だけを使う" "$OUT8B" "正しいnext値"
-assert_not_contains "本文中の2つ目以降の---より後のnextは使わない" "$OUT8B" "本文の水平線の後にある偽next"
-
-echo "=== fixture: ファイル名に制御文字（ESC）が含まれていても無害化される ==="
-V9="$WORKDIR/vault9"
-mkdir -p "$V9/Projects"
-python3 - "$V9/Projects" <<'PYEOF'
-import sys, os
-d = sys.argv[1]
-esc = chr(27)
-name = "proj-esc" + esc + "[31mname.md"
-path = os.path.join(d, name)
-with open(path, "w", encoding="utf-8") as fh:
-    fh.write("---\ndate: 2026-07-01\nupdated: 2026-08-01\nstatus: active\nnext: x\n---\n")
-PYEOF
-RAW9="$(CMUX_NEXT_VAULT="$V9" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once)"
-PLAIN9="$(printf '%s' "$RAW9" | strip_ansi)"
-if printf '%s' "$PLAIN9" | contains_raw_esc; then
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: ファイル名中のESCバイトが無害化されずに残っている"
-else
-  PASS=$(( PASS + 1 ))
-fi
-assert_contains "ESCを含むファイル名でもNext対象1件として表示される" "$PLAIN9" "▶ 稼働中 (1)"
-
-echo "=== fixture: ファイル名にTAB/LFが含まれていてもTSVレコード境界が壊れない ==="
-V10="$WORKDIR/vault10"
-mkdir -p "$V10/Projects"
-# macOS(APFS)では '/' とNULを除き任意バイトがファイル名に使える。TAB/LFは
-# tmpfile（TSV）のフィールド・レコード境界そのものに使う文字なので、書き込み
-# 前にサニタイズされていないと余分な行やフィールドずれとして出現しうる
-# （Codexレビュー指摘・Major対応の再検証）。
-python3 - "$V10/Projects" <<'PYEOF'
-import sys, os
-d = sys.argv[1]
-name = "weird" + chr(9) + "tab" + chr(10) + "newline.md"
-path = os.path.join(d, name)
-with open(path, "w", encoding="utf-8") as fh:
-    fh.write("---\ndate: 2026-07-01\nupdated: 2026-08-01\nstatus: active\nnext: ok\n---\n")
-PYEOF
-OUT10="$(CMUX_NEXT_VAULT="$V10" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-NLINES10="$(printf '%s\n' "$OUT10" | wc -l | tr -d ' ')"
-assert_contains "TAB/LF入りファイル名でもNext対象1件と数える" "$OUT10" "▶ 稼働中 (1)"
-assert_contains "next値は正常表示される（フィールドずれが無い）" "$OUT10" " ok"
-# 想定行数: ヘッダー1 + 明細1 + 空行1 + 外部脳ヘッダー1 (+棚卸し等の行は
-# 対象ディレクトリが無いので棚卸しn/aの1行のみ) = 5行。TAB/LFが無害化されず
-# レコードが割れていれば行数が想定より増える。
-if [ "$NLINES10" -le 5 ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: TAB/LF入りファイル名でTSVレコードが分裂し、想定より行数が多い（実測: ${NLINES10}行）"
-fi
-
-echo "=== fixture: 桁数だけ合った偽日付は並び順・棚卸しどちらにも使われない ==="
-V11="$WORKDIR/vault11"
-mkdir -p "$V11/Projects"
-cat >"$V11/Projects/proj-fakeupdated.md" <<'EOF'
----
-date: 2026-07-15
-updated: 9999-99-99
-status: active
-next: 不正なupdated値を持つノート
----
-EOF
-cat >"$V11/Projects/proj-realupdated.md" <<'EOF'
----
-date: 2026-07-01
-updated: 2026-07-20
-status: active
-next: 正しいupdated値を持つノート
----
-EOF
-INV_FAKE="$WORKDIR/inventory-fake"
-mkdir -p "$INV_FAKE"
-cat >"$INV_FAKE/2026-08-05.md" <<'EOF'
-自動生成。要確認 3 件。
-EOF
-cat >"$INV_FAKE/9999-99-99.md" <<'EOF'
-偽日付ファイル。要確認 777 件と誤読させようとする罠。
-EOF
-OUT11="$(CMUX_NEXT_VAULT="$V11" CMUX_NEXT_INVENTORY_DIR="$INV_FAKE" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_order "不正なupdated（9999-99-99）は date へフォールバックし、正しいupdated値のノートより後に並ぶ" \
-  "$OUT11" "正しいupdated値を持つノート" "不正なupdated値を持つノート"
-assert_contains "棚卸しは実在する暦日のファイル名だけを候補にする（9999-99-99は無視）" "$OUT11" "要確認3件"
-assert_not_contains "偽日付ファイルの件数は使わない" "$OUT11" "777件"
-
-echo "=== fixture: 存在しない暦日（BSD dateが黙って正規化する値）も偽日付扱いされる ==="
-# BSD date -j -f は "2026-02-30" のような存在しない日付を"2026-03-02"へ黙って
-# 正規化して成功してしまう。桁数チェック＋成功可否だけでは弾けないため、
-# is_valid_date の往復一致チェックで正しく拒否できることを確認する
-# （Codex再レビュー指摘・Minor対応の検証）。
-V12="$WORKDIR/vault12"
-mkdir -p "$V12/Projects"
-cat >"$V12/Projects/proj-feb30.md" <<'EOF'
----
-date: 2026-01-01
-updated: 2026-02-30
-status: active
-next: 存在しない日付(2026-02-30)を持つノート
----
-EOF
-cat >"$V12/Projects/proj-real2.md" <<'EOF'
----
-date: 2026-01-01
-updated: 2026-02-10
-status: active
-next: 実在する日付を持つノート
----
-EOF
-INV_FEB30="$WORKDIR/inventory-feb30"
-mkdir -p "$INV_FEB30"
-# 正常ファイルはあえて偽日付(2026-02-30)より辞書順で「古い」名前
-# (2026-02-05)にする。is_valid_date の除外が効いていなければ、辞書順だけで
-# 2026-02-30が「最新」として誤って選ばれてしまうため、このテストは除外ロジ
-# ックが壊れると確実に失敗する（Codex再々レビュー指摘・Minor対応）。
-cat >"$INV_FEB30/2026-02-05.md" <<'EOF'
-自動生成。要確認 5 件。
-EOF
-cat >"$INV_FEB30/2026-02-30.md" <<'EOF'
-存在しない日付のファイル。要確認 888 件と誤読させようとする罠。
-EOF
-OUT12="$(CMUX_NEXT_VAULT="$V12" CMUX_NEXT_INVENTORY_DIR="$INV_FEB30" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_order "存在しない日付updated(2026-02-30)はdateへフォールバックし date(2026-01-01)扱いで最後に並ぶ" \
-  "$OUT12" "実在する日付を持つノート" "存在しない日付"
-assert_contains "棚卸しは実在する2026-02-05を最新として使う（辞書順で新しい2026-02-30には丸め込まれない）" "$OUT12" "要確認5件"
-assert_not_contains "存在しない日付ファイルの件数は使わない" "$OUT12" "888件"
-
-echo "=== fixture: 外部脳ヘルス（棚卸し・週次） ==="
-INV_OK="$WORKDIR/inventory-ok"
-mkdir -p "$INV_OK"
-cat >"$INV_OK/2026-08-01.md" <<'EOF'
-古い棚卸し。要確認 99 件。
-EOF
-cat >"$INV_OK/2026-08-05.md" <<'EOF'
-自動生成。ノート312件を検査し、要確認 15 件。
-EOF
-MAINT_OK="$WORKDIR/maint-ok.json"
-# 固定日時は実行時点からの経過日数（MAINT_STALE_DAYS=8）で「古い」判定に
-# ドリフトするため、MAINT_STALE と同じく実行時刻からの相対値で作る
-# （実測: 固定値 2026-08-05T11:13:16Z を使った旧実装は2026-09-09の実行で
-# 8日を超えて⚠判定になり、週次関連の4アサーションが失敗した）。
-python3 - "$MAINT_OK" <<'PYEOF'
-import json, sys, time
-recent = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 1 * 86400))
-with open(sys.argv[1], "w") as fh:
-    json.dump({"last_success_at": recent, "started_at": recent}, fh)
-PYEOF
-V5="$WORKDIR/vault5"
-mkdir -p "$V5/Projects"
-OUT5="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_OK" \
-  CMUX_NEXT_MAINT_STATE="$MAINT_OK" "$TARGET" --once | strip_ansi)"
-assert_contains "棚卸しは名前順最新ファイル（8/5）の件数を拾う（8/1の99件ではない）" "$OUT5" "要確認15件 (8/5)"
-assert_not_contains "古い棚卸しファイルの件数は使わない" "$OUT5" "99件"
-assert_contains "週次メンテが新しければ✅表示" "$OUT5" "週次 ✅"
-
-echo "=== fixture: 棚卸し抽出失敗はn/a ==="
-INV_BROKEN="$WORKDIR/inventory-broken"
-mkdir -p "$INV_BROKEN"
-cat >"$INV_BROKEN/2026-08-05.md" <<'EOF'
-壊れたレポート（要確認パターンなし）
-EOF
-OUT6="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_BROKEN" \
-  CMUX_NEXT_MAINT_STATE="$MAINT_OK" "$TARGET" --once | strip_ansi)"
-assert_contains "要確認パターンが見つからない時はn/a" "$OUT6" "棚卸し n/a"
-
-echo "=== fixture: 週次メンテが古い（8日以上）と⚠表示 ==="
-MAINT_STALE="$WORKDIR/maint-stale.json"
-python3 - "$MAINT_STALE" <<'PYEOF'
-import json, sys, time
-old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 10 * 86400))
-with open(sys.argv[1], "w") as fh:
-    json.dump({"last_success_at": old, "started_at": old}, fh)
-PYEOF
-OUT7="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_BROKEN" \
-  CMUX_NEXT_MAINT_STATE="$MAINT_STALE" "$TARGET" --once | strip_ansi)"
-assert_contains "10日前の週次メンテは⚠10日前と表示される" "$OUT7" "週次 ⚠10日前"
-assert_contains "警告が1つでもあればヘッダーは⚠ 外部脳" "$OUT7" "⚠ 外部脳"
-
-echo "=== 新仕様: 棚卸しディレクトリ無し・週次のみデータあり→棚卸し行は出ず週次行のみ表示 ==="
-OUT_MAINTONLY="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/inventory-no-such-dir" CMUX_NEXT_MAINT_STATE="$MAINT_OK" "$TARGET" --once | strip_ansi)"
-assert_not_contains "棚卸しのデータ源（ディレクトリ）が無ければ棚卸し行は出ない" "$OUT_MAINTONLY" "棚卸し"
-assert_contains "週次のみデータありなら週次行は表示される" "$OUT_MAINTONLY" "週次 ✅"
-assert_contains "片方でもデータ源があればブロック自体（見出し）は出る" "$OUT_MAINTONLY" "✅ 外部脳"
-
-echo "=== fixture: 両方正常ならヘッダーは✅ 外部脳 ==="
-INV_ZERO="$WORKDIR/inventory-zero2"
-mkdir -p "$INV_ZERO"
-cat >"$INV_ZERO/2026-08-05.md" <<'EOF'
-自動生成。要確認 0 件。
-EOF
-OUT8="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_ZERO" CMUX_NEXT_MAINT_STATE="$MAINT_OK" "$TARGET" --once | strip_ansi)"
-assert_contains "棚卸し0件は要確認0件と表示" "$OUT8" "要確認0件"
-assert_contains "棚卸し0件・週次新しい→ヘッダーは✅ 外部脳" "$OUT8" "✅ 外部脳"
-
-echo "=== 新仕様: Projectsディレクトリが空でも稼働中(0)/保留(0)見出しが必ず出る ==="
-V13="$WORKDIR/vault13-empty-projects"
-mkdir -p "$V13/Projects"
-OUT13="$(CMUX_NEXT_VAULT="$V13" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "Projects空でも稼働中(0)見出しが出る" "$OUT13" "▶ 稼働中 (0)"
-assert_contains "Projects空でも保留(0)見出しが出る" "$OUT13" "⏸ 保留 (0)"
-
-echo "=== 新仕様: Projectsディレクトリ自体が無くても稼働中(0)/保留(0)見出しが出る ==="
-V14="$WORKDIR/vault14-no-projects-dir"
-mkdir -p "$V14"
-OUT14="$(CMUX_NEXT_VAULT="$V14" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "Projectsディレクトリ不在でも稼働中(0)見出しが出る" "$OUT14" "▶ 稼働中 (0)"
-assert_contains "Projectsディレクトリ不在でも保留(0)見出しが出る" "$OUT14" "⏸ 保留 (0)"
-
-echo "=== 新仕様: 保留のみ・稼働中0件でも両見出しが出る ==="
-V15="$WORKDIR/vault15-hold-only"
-mkdir -p "$V15/Projects"
-cat >"$V15/Projects/proj-hold-only.md" <<'EOF'
----
-date: 2026-07-01
-status: paused
-next: 保留のみのケース
----
-EOF
-OUT15="$(CMUX_NEXT_VAULT="$V15" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "保留のみでも稼働中(0)見出しが出る" "$OUT15" "▶ 稼働中 (0)"
-assert_contains "保留のみでは保留(1)見出しが出る" "$OUT15" "⏸ 保留 (1)"
-assert_contains "保留のみのnext値が表示される" "$OUT15" "保留のみのケース"
-
-echo "=== 新仕様: 外部脳データ源が両方無ければブロック（見出し含む）ごと非表示 ==="
-assert_not_contains "棚卸し行が出ない（データ源なし・Projects空fixture流用）" "$OUT13" "棚卸し"
-assert_not_contains "週次行が出ない（データ源なし）" "$OUT13" "週次"
-assert_not_contains "外部脳ヘッダー(✅)も出ない" "$OUT13" "✅ 外部脳"
-assert_not_contains "外部脳ヘッダー(⚠)も出ない" "$OUT13" "⚠ 外部脳"
-
-echo "=== 新仕様: 棚卸しのみデータあり（週次は状態ファイル無し）→棚卸し行のみ表示 ==="
-INV_ONLY="$WORKDIR/inventory-only"
-mkdir -p "$INV_ONLY"
-cat >"$INV_ONLY/2026-08-05.md" <<'EOF'
-自動生成。要確認 2 件。
-EOF
-OUT16="$(CMUX_NEXT_VAULT="$V5" CMUX_NEXT_INVENTORY_DIR="$INV_ONLY" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-assert_contains "棚卸しのみデータありなら棚卸し行が出る" "$OUT16" "要確認2件"
-assert_not_contains "週次のデータ源（状態ファイル）が無ければ週次行は出ない" "$OUT16" "週次"
-assert_contains "片方でもデータ源があればブロック自体（見出し）は出る" "$OUT16" "外部脳"
-
-echo "=== fixture: jqが無い環境ではERRを出す ==="
-STUBDIR="$WORKDIR/stubbin"
-mkdir -p "$STUBDIR"
-# jqを含まない最小限のPATHで実行し、依存不足時に例外終了せずERR表示する
-# ことを確認する（cmux-usage-watch.sh等と同じ防御パターン）。
-OUT9="$(PATH="/usr/bin:/bin" CMUX_NEXT_VAULT="$V5" "$TARGET" --once 2>&1)"
-if command -v jq >/dev/null 2>&1 && [ ! -x "/usr/bin/jq" ] && [ ! -x "/bin/jq" ]; then
-  assert_contains "jq未検出時はERRメッセージを出す" "$OUT9" "ERR"
-else
-  echo "SKIP: このホストの /usr/bin または /bin に jq があるため、jq不在ケースは検証できません"
-fi
-
-echo "=== fixture: FR-31 next: 未設定/空文字時の Tasks 節導出（AC-36〜AC-39・AC-47〜AC-50） ==="
-VN="$WORKDIR/vault-fr31"
-mkdir -p "$VN/Projects"
-
-# N-0（基底・AC-50の比較用）: 手書きの next: あり・updated が最も新しい
-cat >"$VN/Projects/proj-n0-base.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-09-08
-status: active
-next: N0基準next値
----
-## Tasks
-### v1
-- [ ] N0のタスク
-EOF
-
-# AC-36（N-1相当）: 手書きの next: がある（Tasks 節もあるが next: を優先する）
-cat >"$VN/Projects/proj-n1-handwritten.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-09-05
-status: active
-next: 手書きのnext値
----
-## Tasks
-### v1
-- [ ] Tasksの別タスク本文（next:優先時はここに出ないはず）
-EOF
-
-# AC-37（N-2相当）: next: 無し・先頭未完タスクが15コードポイント以内（[x]は除く）
-cat >"$VN/Projects/proj-n2-short.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-09-04
-status: active
----
-## Tasks
-### v1
-- [x] 完了済みタスク
-- [ ] 短いタスク
-EOF
-
-# AC-38（N-3相当）: next: 無し・先頭未完タスクが15コードポイント超（省略記号なし）
-cat >"$VN/Projects/proj-n3-long.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-09-03
-status: active
----
-## Tasks
-### v1
-- [ ] これは十五コードポイントを確実に超える長さの未完タスク本文
-EOF
-
-# AC-39（N-4相当）: next: も Tasks 節も無い（従来どおり --once で (next未設定)）
-cat >"$VN/Projects/proj-n4-none.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-09-02
-status: active
----
-# next も Tasks 節も無いノート
-EOF
-
-# AC-47（N-5相当）: next: が空文字列で、Tasks 節がある → Tasks 節から導出する
-cat >"$VN/Projects/proj-n5-emptynext.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-09-06
-status: active
-next: ""
----
-## Tasks
-### v1
-- [/] 進行中のタスク
-EOF
-
-# AC-48（N-6相当）: next: 無し・先頭未完タスクが TAB・改行相当（CR）・ESC を含む
-# → --list は1行4列のまま、制御文字はすべて無害化される。
-python3 - "$VN/Projects/proj-n6-control.md" <<'PYEOF'
-import sys
-esc = chr(27)
-cr = chr(13)
-tab = chr(9)
-body = "タスク" + tab + "本文" + cr + "続き" + esc + "[31m"
-content = (
-    "---\n"
-    "date: 2026-08-01\n"
-    "updated: 2026-08-25\n"
-    "status: active\n"
-    "---\n"
-    "## Tasks\n"
-    "### v1\n"
-    "- [ ] " + body + "\n"
-)
-with open(sys.argv[1], "w", encoding="utf-8") as fh:
-    fh.write(content)
-PYEOF
-
-# AC-49（N-7相当）: status: completed で next: は無いが Tasks 節がある
-# → --list にも --once の表示にも一切現れない
-cat >"$VN/Projects/proj-n7-completed.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-09-07
-status: completed
----
-## Tasks
-### v1
-- [ ] completedなので出ないはず
-EOF
-
-# AC-50（N-8相当）: status: active・updated が N-0 より古い → N-0 より後に並ぶ
-cat >"$VN/Projects/proj-n8-older.md" <<'EOF'
----
-date: 2026-08-01
-updated: 2026-08-10
-status: active
-next: N8のnext値
----
-## Tasks
-### v1
-- [ ] N8のタスク
-EOF
-
-# AC-33・AC-34のN系横断検査（verifier実装レビュー2巡目 #10・MAJOR対応）:
-# N系にはこれまでVault snapshotが無く、cmux呼出の集約ログも無かった。
-# cmux-next-watch.shはcmuxバイナリを一切呼ばない設計（design.md §7・§11）
-# なので、偽cmuxスタブへ差し替えて「呼ばれない」ことをログで確認する
-# （AC-34）。あわせて--list/--onceの実行前後でVault全体の内容ハッシュを
-# 比較し、AC-33をN系にも横断させる。
-STUBBIN_N="$WORKDIR/stubbin-n"
-mkdir -p "$STUBBIN_N"
-CMUX_CALL_LOG_N="$WORKDIR/cmux_calls_n.log"
-: > "$CMUX_CALL_LOG_N"
-cat >"$STUBBIN_N/cmux" <<STUB
+mk_stub_P6_project "$WORKDIR/p6_nohealth" 5 6 7
+# ヘルス行0行のフレームを直接組み立てる（B行を含まない）。
+{
+  printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/p6_nohealth.data"
+cat > "$WORKDIR/p6_nohealth" <<'EOF'
 #!/bin/bash
-echo "cmux \$*" >> "$CMUX_CALL_LOG_N"
-exit 0
-STUB
-chmod +x "$STUBBIN_N/cmux"
+cat "$0.data"
+EOF
+chmod +x "$WORKDIR/p6_nohealth"
+OUT2="$(CMUX_NEXT_ROWS=40 run_watch "$WORKDIR/p6_nohealth" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+assert_true "AC-97②: ヘルス行0行では外部脳ブロックごと出ない" \
+  "$(printf '%s\n' "$OUT2" | grep -qF '外部脳' && echo 0 || echo 1)"
 
-VN_SNAPSHOT_BEFORE_LIST="$(vault_snapshot "$VN")"
-OUTN_LIST="$(PATH="$STUBBIN_N:$PATH" CMUX_NEXT_VAULT="$VN" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --list)"
-VN_SNAPSHOT_AFTER_LIST="$(vault_snapshot "$VN")"
-assert_true "AC-33: --list実行前後でN系fixture Vaultの内容が不変" \
-  "$([ "$VN_SNAPSHOT_BEFORE_LIST" = "$VN_SNAPSHOT_AFTER_LIST" ] && echo 1 || echo 0)"
+mk_stub_P1a "$WORKDIR/p1a"
+OUT3="$(run_watch "$WORKDIR/p1a" --once)"
+assert_eq "AC-97③(単発): 未導入直後は理由行1行だけ" "AI環境 未導入" "$OUT3"
 
-FIELD3_N1="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n1-handwritten" {print $3}')"
-if [ "$FIELD3_N1" = "手書きのnext値" ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-36: 手書きのnext:がTasks節より優先されない（実測: ${FIELD3_N1}）"
-fi
+# AC-97③本体: 常駐を1つ立て、まずP-6(ヘルスあり)を描かせてから供給側を
+# P-1aへ切り替え、次のフレームに前ティックのヘルス行が1行も残らないこと
+# を実際の2ティックで確かめる（単発呼び出しの検査だけでは「前ティックが
+# そもそも無い」ケースしか見ないため・検証1巡目 #14）。
+STATE_LINK97="$WORKDIR/state97"
+ln -sf "$WORKDIR/p6" "$STATE_LINK97"
+LOG97="$WORKDIR/carryover97.log"
+CMUX_DOCK_SUPPLY_PROJECT="$STATE_LINK97" CMUX_NEXT_INTERVAL=1 CMUX_NEXT_ROWS=40 \
+  bash "$WATCH" >"$LOG97" 2>/dev/null &
+DPID97=$!
+sleep 1.5
+ln -sf "$WORKDIR/p1a" "$STATE_LINK97"
+sleep 1.5
+kill -TERM "$DPID97" 2>/dev/null; wait_pid_bounded "$DPID97" 50
+LAST97="$(python3 - "$LOG97" <<'PYEOF'
+import re, sys
+data = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+blocks = re.findall(r"\x1b\[H(.*?)\x1b\[J", data, re.S)
+last = blocks[-1] if blocks else ""
+last = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", last).replace("\r", "")
+print(last.rstrip("\n"))
+PYEOF
+)"
+assert_eq "AC-97③(2ティック): 縮退後は理由行1行だけで外部脳ブロックが残らない" "AI環境 未導入" "$LAST97"
 
-FIELD3_N2="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n2-short" {print $3}')"
-if [ "$FIELD3_N2" = "短いタスク" ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-37: 先頭未完タスク（[x]を除く）が導出されない（実測: ${FIELD3_N2}）"
-fi
+echo "=== AC-87: ドメインデータに触っていない（Project） ==="
+OUT4="$(CMUX_DOCK_SUPPLY_PROJECT="$WORKDIR/p6" \
+  CMUX_NEXT_VAULT="$WORKDIR/does-not-exist-vault" \
+  CMUX_NEXT_ROWS=40 bash "$WATCH" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+assert_eq "AC-87①: ドメインデータ不在でも期待フレームと完全一致" "$EXPECT_P6" "$OUT4"
 
-# AC-38: 「15コードポイントに収まる」ではなく「先頭15文字との完全一致」で
-# 独立オラクルにする（検証職1巡目 #3指摘：長さと省略記号の不在だけでは
-# ズレた切り詰め方でも通ってしまう）。期待値は元タスク本文の最初の15文字
-# をこのテスト側で別途書き下ろした固定リテラル（実装のtruncate_plainの
-# 呼び出し結果を使い回さない）。
-FIELD3_N3="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n3-long" {print $3}')"
-EXPECT_N3="これは十五コードポイントを確実"
-if [ "$FIELD3_N3" = "$EXPECT_N3" ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-38: 導出値が先頭15文字と完全一致しない（期待: ${EXPECT_N3} / 実測: ${FIELD3_N3}）"
-fi
-assert_not_contains "AC-38: 15コードポイント切り詰めに省略記号は付かない" "$FIELD3_N3" "…"
+mkdir -p "$WORKDIR/trap-vault/Projects"
+echo "trap" > "$WORKDIR/trap-vault/Projects/svwb-pilot-log.md"
+OUT5="$(CMUX_DOCK_SUPPLY_PROJECT="$WORKDIR/p6" \
+  CMUX_NEXT_VAULT="$WORKDIR/trap-vault" \
+  CMUX_NEXT_INVENTORY_DIR="$WORKDIR/trap-vault/inv" \
+  CMUX_NEXT_ROWS=40 bash "$WATCH" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+assert_eq "AC-87②: ドメインデータを実在させ矛盾させても期待フレームと完全一致" "$EXPECT_P6" "$OUT5"
 
-VN_SNAPSHOT_BEFORE_ONCE="$(vault_snapshot "$VN")"
-OUTN_ONCE="$(PATH="$STUBBIN_N:$PATH" CMUX_NEXT_VAULT="$VN" CMUX_NEXT_INVENTORY_DIR="$WORKDIR/no-such-inventory" \
-  CMUX_NEXT_MAINT_STATE="$WORKDIR/no-such-maint.json" "$TARGET" --once | strip_ansi)"
-VN_SNAPSHOT_AFTER_ONCE="$(vault_snapshot "$VN")"
-assert_true "AC-33: --once実行前後でN系fixture Vaultの内容が不変" \
-  "$([ "$VN_SNAPSHOT_BEFORE_ONCE" = "$VN_SNAPSHOT_AFTER_ONCE" ] && echo 1 || echo 0)"
-assert_contains "AC-39: next:もTasks節も無ければ--onceでも従来どおり(next未設定)" "$OUTN_ONCE" "(next未設定)"
+# 走査対象は「描画側のソースと同一repo内のlib」の4ファイル全部（設計
+# §31.5）。$WATCH単体だけでは、lib-supply-frame.sh/lib-dock-view.shに
+# ドメイン環境変数名等が紛れ込んでも検出できない（検証2巡目 #24）。
+RENDER_FILES=("$WATCH" "$CMUX_DIR/lib-dock-view.sh" "$CMUX_DIR/lib-supply-frame.sh")
+assert_true "AC-87③: ソース(描画側4ファイル)にドメイン環境変数名が0件" \
+  "$(grep -qE 'CMUX_NEXT_VAULT|CMUX_TASK_VAULT|CMUX_TASK_STATE' "${RENDER_FILES[@]}" && echo 0 || echo 1)"
+assert_true "AC-87③: ソース(描画側4ファイル)に固定パスが0件" \
+  "$(grep -qE 'Data/obsidian|\.config/cmux-task-watch|\.claude/logs' "${RENDER_FILES[@]}" && echo 0 || echo 1)"
+assert_true "AC-87③: ソース(描画側4ファイル)にcmuxの呼び出しが0件" \
+  "$(grep -qE '(^|[;&|(]|\$\()[[:space:]]*cmux[[:space:]]+(--json|identify|workspace|list-windows)' "${RENDER_FILES[@]}" && echo 0 || echo 1)"
 
-# AC-47: next: が空文字列のノートも、Tasks 節があれば導出対象になる
-# （fm_field が引用符を剥がした後の空文字列を「未設定」と同じに扱う経路）。
-FIELD3_N5="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n5-emptynext" {print $3}')"
-if [ "$FIELD3_N5" = "進行中のタスク" ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-47: next:が空文字列のノートでTasks節からの導出が効かない（実測: ${FIELD3_N5}）"
-fi
+echo "=== AC-88: 5ティックで供給側の呼出しがちょうど5回前後 ==="
+SPY_LOG="$WORKDIR/spy.log"
+: > "$SPY_LOG"
+cat > "$WORKDIR/spy_supply" <<SPYEOF
+#!/bin/bash
+echo call >> "$SPY_LOG"
+TAB="\$(printf '\t')"
+printf '#V%scmux-dock-frame/1%sProject\n' "\$TAB" "\$TAB"
+printf 'P%s1%sspy%s%s稼働中\n' "\$TAB" "\$TAB" "\$TAB" "\$TAB"
+printf 'E%s1\n' "\$TAB"
+SPYEOF
+chmod +x "$WORKDIR/spy_supply"
+AC88_INTERVAL=1
+AC88_T0="$(now_mono)"
+CMUX_DOCK_SUPPLY_PROJECT="$WORKDIR/spy_supply" CMUX_NEXT_INTERVAL="$AC88_INTERVAL" CMUX_NEXT_ROWS=40 \
+  bash "$WATCH" >/dev/null 2>&1 &
+DAEMON_PID=$!
+# 5回目を検出したら即killし、6回目の発生を防いで「ちょうど5件(±0)」を
+# wall-clockのsleepより厳密に検査する（検証1巡目 #14）。
+waited=0
+CALLS=0
+while [ "$waited" -lt 150 ]; do
+  CALLS="$(awk 'END{print NR}' "$SPY_LOG" 2>/dev/null)"
+  is_number "$CALLS" || CALLS=0
+  [ "$CALLS" -ge 5 ] && break
+  sleep 0.05
+  waited=$(( waited + 1 ))
+done
+AC88_T1="$(now_mono)"
+kill -TERM "$DAEMON_PID" 2>/dev/null
+wait_pid_bounded "$DAEMON_PID" 50
+sleep 0.2
+CALLS="$(awk 'END{print NR}' "$SPY_LOG" 2>/dev/null)"
+assert_eq "AC-88: 5ティックで供給側の呼出しがちょうど5回(±0)" "5" "$CALLS"
+# 呼出回数だけでなく間隔も見る（検証2巡目 #31）。5回に達するまでの経過が
+# 4×interval未満なら、ティック間隔が縮む倍呼び系の退行を見逃す。
+AC88_ELAPSED="$(python3 -c "print($AC88_T1 - $AC88_T0)")"
+assert_true "AC-88: 5回目までの経過が4×interval(=4秒)以上(検証2巡目#31)" \
+  "$(python3 -c "print(1 if $AC88_ELAPSED >= 4 * $AC88_INTERVAL else 0)")"
 
-# AC-48: TAB・CR（改行相当）・ESC を含むタスク本文でも、無害化された固定
-# 文字列と完全一致し、当該行が4列のまま・ESCバイトが1つも残らないこと。
-LINE_N6="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' '$2=="proj-n6-control"')"
-FIELD3_N6="$(printf '%s\n' "$LINE_N6" | awk -F '\t' '{print $3}')"
-NCOLS_N6="$(printf '%s\n' "$LINE_N6" | awk -F '\t' '{print NF}')"
-EXPECT_N6="タスク 本文 続き [31m"
-if [ "$FIELD3_N6" = "$EXPECT_N6" ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-48: TAB/CR/ESC無害化後の値が期待と一致しない（期待: ${EXPECT_N6} / 実測: ${FIELD3_N6}）"
-fi
-if [ "$NCOLS_N6" -eq 4 ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-48: TAB混入行が4列のままでない（実測: ${NCOLS_N6}列）"
-fi
-if printf '%s' "$OUTN_LIST" | contains_raw_esc; then
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-48: --list出力に生のESCバイトが残っている"
-else
-  PASS=$(( PASS + 1 ))
-fi
+echo "=== AC-90: FR-72の描画射影（切り詰め・クランプ・件数一致） ==="
+# 10コードポイント超の正式名と幅に収まらないnext値・クランプなし(M-4=幅16)。
+{
+  printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf 'P\t1\tavatar-switch-plan-long-name\t配布方式のたたき台を書く長い説明文\t稼働中\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/p90a.data"
+cat > "$WORKDIR/p90a" <<'EOF'
+#!/bin/bash
+cat "$0.data"
+EOF
+chmod +x "$WORKDIR/p90a"
+OUT6="$(CMUX_NEXT_ROWS=40 CMUX_TASK_COLS=16 run_watch "$WORKDIR/p90a" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+NAME_LINE="$(printf '%s\n' "$OUT6" | sed -n '2p')"
+assert_true "AC-90③: 正式名は10コードポイントへ切り詰められる" \
+  "$(printf '%s' "$NAME_LINE" | awk '{print $2}' | python3 -c 'import sys; s=sys.stdin.readline().rstrip("\n"); print(1 if len(s)<=10 else 0)')"
 
-# AC-49: status: completed のノートは Tasks 節があっても --list にも
-# --once にも一切現れない（既存のstatus絞り込みがFR-31導出後も効くこと）。
-assert_not_contains "AC-49: completedノートは--listに現れない" "$OUTN_LIST" "proj-n7-completed"
-assert_not_contains "AC-49: completedノートのタスク本文も--listに現れない" "$OUTN_LIST" "completedなので出ないはず"
-OUTN7_ONCE="$(printf '%s\n' "$OUTN_ONCE")"
-assert_not_contains "AC-49: completedノートは--onceにも現れない" "$OUTN7_ONCE" "completedなので出ないはず"
+# クランプあり（高さ8）＝各区分の見出しの件数が全行数と一致(落ちた分だけ減らない)
+{
+  printf '#V\tcmux-dock-frame/1\tProject\n'
+  for i in 1 2 3 4 5; do
+    printf 'P\t%d\tproj-%d\tnext-%d\t稼働中\n' "$i" "$i" "$i"
+  done
+  printf 'P\t6\tproj-6\tnext-6\t保留\n'
+  printf 'E\t6\n'
+} > "$WORKDIR/p90b.data"
+cat > "$WORKDIR/p90b" <<'EOF'
+#!/bin/bash
+cat "$0.data"
+EOF
+chmod +x "$WORKDIR/p90b"
+OUT7="$(CMUX_NEXT_ROWS=8 CMUX_TASK_COLS=40 run_watch "$WORKDIR/p90b" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+assert_true "AC-90④: 稼働中見出しの件数(5)はクランプで行が落ちても不変" \
+  "$(printf '%s\n' "$OUT7" | grep -qF '稼働中 (5)' && echo 1 || echo 0)"
+assert_true "AC-90④: 保留見出しの件数(1)は不変" \
+  "$(printf '%s\n' "$OUT7" | grep -qF '保留 (1)' && echo 1 || echo 0)"
 
-# AC-50: --list の全行が4列で、N-0（updated新しい）がN-8（updated古い）
-# より前に並ぶ（updated降順）。
-assert_order "AC-50: N-0がN-8よりupdated降順で前に並ぶ" "$OUTN_LIST" "proj-n0-base" "proj-n8-older"
-BAD_NCOLS_ROWS="$(printf '%s\n' "$OUTN_LIST" | awk -F '\t' 'NF && NF!=4' | wc -l | tr -d ' ')"
-if [ "$BAD_NCOLS_ROWS" -eq 0 ]; then
-  PASS=$(( PASS + 1 ))
-else
-  FAIL=$(( FAIL + 1 ))
-  echo "FAIL: AC-50/FR-44 ④: --list に4列でない行が${BAD_NCOLS_ROWS}件ある"
-fi
+echo "=== 同一フレーム抑止の回帰（検証1巡目#9・検証2巡目#25②） ==="
+# 同じP-6をProjectへ2ティック与え、2ティック目は同期出力0バイトになる
+# （cmux-next-watch.sh:305のif [ "$frame" != "$last_frame" ]...を
+# if trueへ差し戻すと出力が積み上がりFAILになる）。
+mk_stub_P6_project "$WORKDIR/same_p6" 5 6 7
+SAMELOG="$WORKDIR/same_frame.log"
+CMUX_DOCK_SUPPLY_PROJECT="$WORKDIR/same_p6" CMUX_NEXT_INTERVAL=1 CMUX_NEXT_ROWS=40 \
+  bash "$WATCH" >"$SAMELOG" 2>/dev/null &
+SAME_PID=$!
+sleep 1.5   # 1ティック目の同期描画を確実に待つ
+SIZE_1="$(wc -c < "$SAMELOG" | tr -d ' ')"
+sleep 1.2   # 2ティック目のsleep区間を跨ぐ（フレーム不変のはず）
+SIZE_2="$(wc -c < "$SAMELOG" | tr -d ' ')"
+kill -TERM "$SAME_PID" 2>/dev/null; wait_pid_bounded "$SAME_PID" 50
+assert_true "同一フレーム抑止: 1ティック目で何か描画された" "$([ "$SIZE_1" -gt 0 ] && echo 1 || echo 0)"
+assert_eq "同一フレーム抑止(検証1巡目#9の回帰): 2ティック目の同期出力が0バイト" "0" "$(( SIZE_2 - SIZE_1 ))"
 
-# AC-34: N系（--list・--once）実行を通してcmuxスタブが1度も呼ばれない
-# （cmux-next-watch.shはcmuxバイナリを呼ばない設計。呼ばれていればFR-31の
-# 導出処理か周辺の変更がcmuxへ書込系コマンドを送っている恐れがある）。
-CMUX_CALLS_N="$(wc -l < "$CMUX_CALL_LOG_N" | tr -d ' ')"
-assert_true "AC-34: N系fixture実行（--list/--once）でcmuxが1度も呼ばれない" \
-  "$([ "$CMUX_CALLS_N" -eq 0 ] && echo 1 || echo 0)"
+echo "=== 締切経路の常駐stderrが0バイト（検証1巡目#11・検証2巡目#25③） ==="
+# limiterがプロセスグループを終了させる締切経路でも、bashのjob-control通知
+# (Terminated: 15 ...)がProject常駐のstderrへ漏れないことを固定する
+# （Task側は既にAC-95で検査済み・disownを外すとここでFAILになる）。
+mk_stub_P3 "$WORKDIR/deadline_p3" "$WORKDIR/deadline_p3.fp"
+DEADLINE_OUT="$(CMUX_DOCK_SUPPLY_PROJECT="$WORKDIR/deadline_p3" CMUX_DOCK_SUPPLY_TIMEOUT=1 \
+  bash "$WATCH" --once 2>"$WORKDIR/deadline_p3.stderr")"
+assert_eq "締切経路: --onceはAI環境 応答なし" "AI環境 応答なし" "$DEADLINE_OUT"
+assert_eq "締切経路の常駐stderrが0バイト(検証1巡目#11の回帰)" "0" \
+  "$(wc -c < "$WORKDIR/deadline_p3.stderr" | tr -d ' ')"
+
+echo "=== AC-123: 終了経路の全5セル（Project・自然終了・非0終了・締切・TERM・HUP） ==="
+wait_fp3() {
+  local fp="$1" limit="${2:-100}" waited=0
+  while [ "$waited" -lt "$limit" ]; do
+    if [ -s "$fp" ]; then
+      local hm=0 hc=0 hw=0 k
+      while IFS="$(printf '\t')" read -r k _ _; do
+        case "$k" in main) hm=1 ;; child) hc=1 ;; watchdog) hw=1 ;; esac
+      done < "$fp"
+      [ "$hm" = 1 ] && [ "$hc" = 1 ] && [ "$hw" = 1 ] && return 0
+    fi
+    sleep 0.1; waited=$(( waited + 1 ))
+  done
+  return 1
+}
+fp_all_dead() {
+  local fp="$1" alive=0 pid pgid
+  while IFS="$(printf '\t')" read -r _ pid pgid; do
+    kill -0 "$pid" 2>/dev/null && alive=$(( alive + 1 ))
+    [ -n "$pgid" ] && kill -0 "-$pgid" 2>/dev/null && alive=$(( alive + 1 ))
+  done < "$fp"
+  echo "$alive"
+}
+esc_count() {
+  python3 - "$1" "$2" <<'PYEOF'
+import sys, re
+data = open(sys.argv[1], "rb").read()
+pat = sys.argv[2].encode()
+print(len(re.findall(re.escape(pat), data)))
+PYEOF
+}
+ESC25H="$(printf '\033[?25h')"
+ESC2026L="$(printf '\033[?2026l')"
+# run_supply/fetch_frameがTMPDIR配下に作る一時物(raw/rc/done/tout/probe/
+# model)だけを対象に前後比較する（AC-123④・検証2巡目 #22）。
+tmp_snapshot() {
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'cmux-supply-*' 2>/dev/null | sort
+}
+
+for spec in "natural:mk_stub_P26a" "nonzero:mk_stub_P26b" "timeout:mk_stub_P3"; do
+  name="${spec%%:*}" fn="${spec#*:}"
+  fp="$WORKDIR/proj_$name.fp"
+  supply="$WORKDIR/proj_${name}_supply"
+  if [ "$name" = "timeout" ]; then
+    "$fn" "$supply" "$fp"
+  else
+    "$fn" "$supply" "$fp" Project
+  fi
+  LOG="$WORKDIR/proj_${name}_daemon.log"
+  BEFORE_TMP="$(tmp_snapshot)"
+  CMUX_DOCK_SUPPLY_PROJECT="$supply" CMUX_DOCK_SUPPLY_TIMEOUT=1 CMUX_NEXT_INTERVAL=1 CMUX_NEXT_ROWS=40 \
+    bash "$WATCH" >"$LOG" 2>/dev/null &
+  DPID=$!
+  if ! wait_fp3 "$fp" 100; then
+    FAIL=$(( FAIL + 1 ))
+    echo "FAIL: AC-123($name/Project): 足跡の3種別(main/child/watchdog)が揃わない"
+    kill -TERM "$DPID" 2>/dev/null; wait_pid_bounded "$DPID" 50
+    continue
+  fi
+  sleep 1.5
+  DAEMON_ALIVE="$(kill -0 "$DPID" 2>/dev/null && echo 1 || echo 0)"
+  assert_eq "AC-123($name/Project): 常駐は生き続ける" "1" "$DAEMON_ALIVE"
+  assert_eq "AC-123($name/Project): 足跡の全PID・全PGIDが死んでいる" "0" "$(fp_all_dead "$fp")"
+  assert_eq "AC-123($name/Project): ESC[?25hは出ない(常駐は生存)" "0" "$(esc_count "$LOG" "$ESC25H")"
+  ESC2026L_N="$(esc_count "$LOG" "$ESC2026L")"
+  assert_true "AC-123($name/Project): 描画を開始したフレームにESC[?2026lがある" \
+    "$([ "$ESC2026L_N" -ge 1 ] && echo 1 || echo 0)"
+  kill -TERM "$DPID" 2>/dev/null; wait_pid_bounded "$DPID" 50
+  w=0
+  while [ "$(fp_all_dead "$fp")" != "0" ] && [ "$w" -lt 30 ]; do sleep 0.1; w=$(( w + 1 )); done
+  AFTER_TMP="$(tmp_snapshot)"
+  assert_eq "AC-123($name/Project): TMPDIRの一時物集合が実行前に戻っている" "$BEFORE_TMP" "$AFTER_TMP"
+done
+sleep 1
+
+for sig in TERM HUP; do
+  name="sig_$sig"
+  fp="$WORKDIR/proj_${name}.fp"
+  supply="$WORKDIR/proj_${name}_supply"
+  mk_stub_P3 "$supply" "$fp"
+  LOG="$WORKDIR/proj_${name}_daemon.log"
+  BEFORE_TMP="$(tmp_snapshot)"
+  CMUX_DOCK_SUPPLY_PROJECT="$supply" CMUX_DOCK_SUPPLY_TIMEOUT=30 CMUX_NEXT_ROWS=40 \
+    bash "$WATCH" >"$LOG" 2>/dev/null &
+  DPID=$!
+  if ! wait_fp3 "$fp" 100; then
+    FAIL=$(( FAIL + 1 ))
+    echo "FAIL: AC-123($sig/Project): 足跡の3種別(main/child/watchdog)が揃わない"
+    kill "-$sig" "$DPID" 2>/dev/null; wait_pid_bounded "$DPID" 50
+    continue
+  fi
+  kill "-$sig" "$DPID" 2>/dev/null
+  wait_pid_bounded "$DPID" 50
+  sleep 0.3
+  DAEMON_ALIVE="$(kill -0 "$DPID" 2>/dev/null && echo 1 || echo 0)"
+  assert_eq "AC-123($sig/Project): 常駐自身が終了する" "0" "$DAEMON_ALIVE"
+  assert_eq "AC-123($sig/Project): 足跡の全PID・全PGIDが死んでいる" "0" "$(fp_all_dead "$fp")"
+  assert_eq "AC-123($sig/Project): ESC[?25hがちょうど1回出る" "1" "$(esc_count "$LOG" "$ESC25H")"
+  w=0
+  while [ "$(fp_all_dead "$fp")" != "0" ] && [ "$w" -lt 30 ]; do sleep 0.1; w=$(( w + 1 )); done
+  AFTER_TMP="$(tmp_snapshot)"
+  assert_eq "AC-123($sig/Project): TMPDIRの一時物集合が実行前に戻っている" "$BEFORE_TMP" "$AFTER_TMP"
+done
+
+echo "=== AC-116: TMPDIR異常でも常駐は生存し\$HOME配下に新規ファイルが無い(RP) ==="
+BEFORE_HOME="$(find "$HOME" -maxdepth 1 2>/dev/null | sort)"
+OLD_TMPDIR="${TMPDIR:-}"
+export TMPDIR="$WORKDIR/no-such-tmpdir"
+OUT_TD="$(CMUX_DOCK_SUPPLY_PROJECT="$WORKDIR/p6" bash "$WATCH" --once)"
+export TMPDIR="$OLD_TMPDIR"
+assert_eq "AC-116(RP): TMPDIR不在はAI環境 応答なし" "AI環境 応答なし" "$OUT_TD"
+AFTER_HOME="$(find "$HOME" -maxdepth 1 2>/dev/null | sort)"
+assert_eq "AC-116(RP): \$HOME直下の一覧が不変" "$BEFORE_HOME" "$AFTER_HOME"
+
+echo "=== --list 拒否（F-56） ==="
+OUT8="$(bash "$WATCH" --list 2>&1)"; RC8=$?
+assert_eq "--list は既知だが提供しない引数としてrc=1" "1" "$RC8"
 
 echo
 echo "=== 結果: PASS=$PASS FAIL=$FAIL ==="
