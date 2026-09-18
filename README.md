@@ -24,7 +24,7 @@ dotfiles/
 │   ├── claude-teams-launch.sh     Launches cmux + starts/attaches the Agent Teams "Supervisor" workspace
 │   ├── claude-teams-entry.sh      Session picker (new vs. resume) invoked by claude-teams-launch.sh
 │   ├── cmux-usage-watch.sh        Dock pane: Claude/Codex usage bars (reads the cache JSON written by takumi009-ai-env's usage-fetch.sh)
-│   ├── cmux-system-watch.sh       Dock pane: CPU/GPU/RAM/power (via macmon)
+│   ├── cmux-system-watch.sh       Dock pane: CPU/GPU/RAM (via macmon)
 │   ├── cmux-feed-watch.sh         Dock pane: compact cmux workstream feed
 │   ├── cmux-next-watch/           Dock pane: cross-project "next action" + external-brain health
 │   │   ├── cmux-next-watch.sh
@@ -174,7 +174,7 @@ dotfiles/
 │   ├── claude-teams-launch.sh     cmuxを起動しAgent Teamsの「Supervisor」ワークスペースを開始/復帰
 │   ├── claude-teams-entry.sh      claude-teams-launch.shから呼ばれるセッション選択（新規/再開）
 │   ├── cmux-usage-watch.sh        Dockペイン: Claude/Codex使用率バー（takumi009-ai-envのusage-fetch.shが書くキャッシュJSONを読む）
-│   ├── cmux-system-watch.sh       Dockペイン: CPU/GPU/RAM/電力（macmon経由）
+│   ├── cmux-system-watch.sh       Dockペイン: CPU/GPU/RAM（macmon経由）
 │   ├── cmux-feed-watch.sh         Dockペイン: cmuxワークストリームの簡易フィード表示
 │   ├── cmux-next-watch/           Dockペイン: プロジェクト横断「次アクション」＋外部脳ヘルス
 │   │   ├── cmux-next-watch.sh
