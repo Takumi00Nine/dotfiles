@@ -89,6 +89,29 @@ assert_eq "空は上書き無し扱い（stty/既定40へフォールバック�
 assert_eq "非数字は上書き無し扱い（stty/既定40へフォールバック）" "1" "$([ -n "$(term_cols "abc")" ] && echo 1 || echo 0)"
 assert_eq "term_rowsの正整数上書きはそのまま使う" "24" "$(term_rows "24")"
 assert_eq "term_rowsの0は上書き無し扱い" "1" "$([ -n "$(term_rows "0")" ] && echo 1 || echo 0)"
+
+echo "=== term_cols の CMUX_DOCK_MAX_COLS 上限（上書き値は対象外・stty実測値だけ丸める） ==="
+# _stty_cols を関数上書きで差し替え、実 tty の有無に関わらず任意の桁数を
+# 模擬する（stty コマンド自体の上書きは </dev/tty のリダイレクトが先に
+# 評価されて失敗するため使えない＝lib-dock-view.sh 側のコメントに実測済み
+# と明記）。このブロックの外側では元に戻す（以降のテストへ影響させない）。
+_stty_cols() { printf '148'; }
+assert_eq "上書きありは上限を無視する（stty148桁でも80のまま）" "80" "$(term_cols "80")"
+assert_eq "stty桁数(148)が既定60を超えるとき既定60へ丸める" "60" "$(CMUX_DOCK_MAX_COLS= term_cols "")"
+assert_eq "CMUX_DOCK_MAX_COLS=80指定時、stty桁数(148)は80へ丸める" "80" "$(CMUX_DOCK_MAX_COLS=80 term_cols "")"
+assert_eq "CMUX_DOCK_MAX_COLSが0なら既定60へ丸める" "60" "$(CMUX_DOCK_MAX_COLS=0 term_cols "")"
+assert_eq "CMUX_DOCK_MAX_COLSが非数字なら既定60へ丸める" "60" "$(CMUX_DOCK_MAX_COLS=abc term_cols "")"
+
+_stty_cols() { printf '50'; }
+assert_eq "stty桁数(50)が既定60以下ならそのまま（丸めない）" "50" "$(CMUX_DOCK_MAX_COLS= term_cols "")"
+
+_stty_cols() { printf '70'; }
+assert_eq "CMUX_DOCK_MAX_COLS=80指定時、stty桁数(70)が上限未満ならそのまま" "70" "$(CMUX_DOCK_MAX_COLS=80 term_cols "")"
+
+# unset -f だと元の定義が失われたままになる（このシェルでの再定義に上書き
+# の巻き戻し履歴が無いため）。lib を再 source して原本の _stty_cols へ戻す。
+. "$LIB"
+
 # stty が取れない環境（テスト実行はパイプ経由が通常なので /dev/tty が無い）
 # では、term_cols は既定40・term_rows は既定0（クランプ無効）へ落ちることを
 # 確認する（実端末依存の分岐なので確定的に検査できるのはこの既定値だけ）。

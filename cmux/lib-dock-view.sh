@@ -2,8 +2,10 @@
 # cmux 呼び出しのタイムアウト）。cmux-task-watch.sh（新規）と
 # cmux-next-watch.sh（既存・互換ラッパ経由）の両方から source される
 # （表示幅・切り詰めの実装差を構造的に作らないため）。単体では実行しない
-# （関数定義のみ、副作用なし）。lib は環境変数を読まない。上書き値は
-# 呼び出し側が引数で渡す（cmux-session-todo 設計 §1.4）。
+# （関数定義のみ、副作用なし）。lib は基本的に環境変数を読まない。上書き値
+# は呼び出し側が引数で渡す（cmux-session-todo 設計 §1.4）。例外＝
+# term_cols() の表示幅上限だけは CMUX_DOCK_MAX_COLS を直接読む（Task／
+# Project 両常駐で上限を1箇所に揃えるため。詳細は term_cols() 本体）。
 #
 # 使い方:
 #   LIB_DIR="$(cd -P "$(dirname "$0")" && pwd)/.."
@@ -93,18 +95,40 @@ truncate_plain() {
   jq -Rr --argjson w "$n" '.[0:$w]' <<<"$s" 2>/dev/null
 }
 
-# 端末の桁数。$1（上書き値）が正整数（1以上）ならそれをそのまま使う。
-# 空・非数字・0 は上書き無しと同じ扱いで stty size </dev/tty へ問い合わせる。
-# 取得できなければ 40。
+# stty size </dev/tty の桁数だけを実測する（取得できなければ空文字）。
+# term_cols() の内部ヘルパー（stty 呼び出しをここへ分離することで、テスト
+# がこの関数だけを丸ごと差し替えて任意の桁数を模擬できる＝実 tty を持たな
+# いサンドボックスでも term_cols の上限クランプを検査できるようにする。
+# stty コマンド自体を関数上書きしても </dev/tty のリダイレクトが先に評価
+# されて失敗するため模擬できない＝実測済みの理由）。
+_stty_cols() {
+  local sz
+  sz=$( { stty size </dev/tty; } 2>/dev/null )
+  printf '%s' "${sz#* }"
+}
+
+# 端末の桁数。$1（上書き値）が正整数（1以上）ならそれをそのまま使う（上限
+# の対象外＝テストが固定値で描画結果を検証するための契約）。空・非数字・0
+# は上書き無しと同じ扱いで _stty_cols（stty size </dev/tty）へ問い合わせ、
+# 取得できなければ 40。Dock ペインの pty が報告する桁数（stty size）は、
+# Dock 自体の可視幅より大きく報告されることがある（cmux Dock ペインの既知
+# の癖）ため、環境変数 CMUX_DOCK_MAX_COLS（正整数・既定 60。空／非数字／0
+# は既定扱い）を超えないよう丸める（この関数だけの例外として lib が環境
+# 変数を読む＝描画幅の上限は呼び出し側ごとに個別定数を持たせず、この1箇所
+# に集約する）。
 term_cols() {
-  local override="$1" sz c
+  local override="$1" c max
   case "$override" in
     ''|*[!0-9]*|0) : ;;
     *) printf '%s' "$override"; return 0 ;;
   esac
-  sz=$( { stty size </dev/tty; } 2>/dev/null )
-  c="${sz#* }"
+  c="$(_stty_cols)"
   is_number "$c" || c=40
+  max="${CMUX_DOCK_MAX_COLS:-}"
+  case "$max" in
+    ''|*[!0-9]*|0) max=60 ;;
+  esac
+  [ "$c" -gt "$max" ] && c="$max"
   printf '%s' "$c"
 }
 

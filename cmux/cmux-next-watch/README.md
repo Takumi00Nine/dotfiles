@@ -63,6 +63,7 @@ cmux-next-watch.sh [--once]
 | `CMUX_NEXT_INTERVAL` | 60 | 常駐ループの周期（秒） |
 | `CMUX_NEXT_REDRAW_HEARTBEAT` | 600 | 同一フレームでも強制再描画する間隔（秒） |
 | `CMUX_NEXT_ROWS` | 未設定（`stty` 実測） | 端末の高さの強制上書き |
+| `CMUX_DOCK_MAX_COLS` | 60 | 桁数の実測値（`stty` 実測）がこの値を超えるとき丸める上限。Dock ペインの pty 桁数が可視幅より大きく報告される既知の癖への対処（`lib-dock-view.sh` の `term_cols()` 共通・Task 常駐と共有） |
 
 ## 供給側との契約
 
