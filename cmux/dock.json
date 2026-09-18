@@ -3,7 +3,7 @@
     {
       "id": "usage",
       "title": "Usage",
-      "command": "$HOME/work/claude-codex-usage/cmux-usage-watch.sh",
+      "command": "$HOME/work/dotfiles/cmux/cmux-usage-watch.sh",
       "height": 140
     },
     {

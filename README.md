@@ -19,10 +19,11 @@ Environment: macOS (Apple Silicon)
 dotfiles/
 ├── cmux/                          cmux (AI-terminal multiplexer) integration
 │   ├── cmux.json                  cmux app config: notification filtering
-│   ├── dock.json                  Dock pane definitions: Usage / Project / Task / System (Usage's script lives in the sibling claude-codex-usage repo)
+│   ├── dock.json                  Dock pane definitions: Usage / Project / Task / System
 │   ├── claude-cmux-hooks.json     Claude Code hooks (turn-completion notify, feed log, etc.), injected via --settings
 │   ├── claude-teams-launch.sh     Launches cmux + starts/attaches the Agent Teams "Supervisor" workspace
 │   ├── claude-teams-entry.sh      Session picker (new vs. resume) invoked by claude-teams-launch.sh
+│   ├── cmux-usage-watch.sh        Dock pane: Claude/Codex usage bars (reads the cache JSON written by takumi009-ai-env's usage-fetch.sh)
 │   ├── cmux-system-watch.sh       Dock pane: CPU/GPU/RAM/power (via macmon)
 │   ├── cmux-feed-watch.sh         Dock pane: compact cmux workstream feed
 │   ├── cmux-next-watch/           Dock pane: cross-project "next action" + external-brain health
@@ -59,7 +60,7 @@ dotfiles/
 └── install.sh                     Installer: symlink each config, or append (zsh)
 ```
 
-Usage-tracking (`claude-cache.json`/`codex-cache.json`, the refresh LaunchAgent, the tmux status-bar segment, and the `cmux-usage-watch.sh` script that `dock.json`'s Usage pane runs) lives entirely in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repository, not here.
+Usage-tracking is split across two repos: this repo bundles the Dock-rendering script (`cmux/cmux-usage-watch.sh`, run by `dock.json`'s Usage pane) and reads the cache JSON (`claude-cache.json`/`codex-cache.json`) it's given; the cache-refresh LaunchAgent that actually fetches Claude/Codex usage and writes that cache lives in the separate `takumi009-ai-env` repo's `scripts/usage-fetch.sh` (LaunchAgent `com.takumi009.usage-fetch`). The old dedicated `claude-codex-usage` repo is retired.
 
 ---
 
@@ -81,7 +82,7 @@ Usage-tracking (`claude-cache.json`/`codex-cache.json`, the refresh LaunchAgent,
 | `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | generated (template with `__DOTFILES_HOME__` filled in) + `launchctl` (re)load, unless `SKIP_LAUNCHCTL=1` |
 | `zsh/aliases.zsh` | end of `~/.zshrc` | **idempotent append** of a source line, not a symlink (see below) |
 
-A few `cmux/` scripts are *not* symlinked individually: `claude-cmux-hooks.json`, `claude-teams-entry.sh`, `cmux-system-watch.sh`, `cmux-feed-watch.sh`, `layout-enforce.sh`, `lib-layout.sh`, `show-review.sh`, `cmux-dock-guard/cmux-dock-guard.sh`, `cmux-next-watch/cmux-next-watch.sh`, `cmux-task-watch/cmux-task-watch.sh`. They're invoked directly from this repo's path (by `dock.json` commands, the `cct` alias's `--settings` flag, `claude-teams-launch.sh`'s sibling-script resolution, or the `cmux-dock-guard` LaunchAgent's `ProgramArguments`), which assumes the repo lives at `~/work/dotfiles`. `dock.json`'s Project and Task panes point directly at `$HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh` and `$HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh`; both receive a supply-side frame from the separate `takumi009-ai-env` repo (see `cmux/cmux-task-watch/README.md` / `cmux/cmux-next-watch/README.md`) — no `~/work/tools/` symlink is created or required for either pane. `dock.json`'s Usage pane command points at `cmux-usage-watch.sh` in the separate `claude-codex-usage` repo instead (`~/work/claude-codex-usage/cmux-usage-watch.sh`) — that script and its LaunchAgent are not part of this repo.
+A few `cmux/` scripts are *not* symlinked individually: `claude-cmux-hooks.json`, `claude-teams-entry.sh`, `cmux-usage-watch.sh`, `cmux-system-watch.sh`, `cmux-feed-watch.sh`, `layout-enforce.sh`, `lib-layout.sh`, `show-review.sh`, `cmux-dock-guard/cmux-dock-guard.sh`, `cmux-next-watch/cmux-next-watch.sh`, `cmux-task-watch/cmux-task-watch.sh`. They're invoked directly from this repo's path (by `dock.json` commands, the `cct` alias's `--settings` flag, `claude-teams-launch.sh`'s sibling-script resolution, or the `cmux-dock-guard` LaunchAgent's `ProgramArguments`), which assumes the repo lives at `~/work/dotfiles`. `dock.json`'s Project, Task, and Usage panes point directly at `$HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh`, `$HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh`, and `$HOME/work/dotfiles/cmux/cmux-usage-watch.sh`; Project and Task each receive a supply-side frame from the separate `takumi009-ai-env` repo (see `cmux/cmux-task-watch/README.md` / `cmux/cmux-next-watch/README.md`), and Usage reads the cache JSON that `takumi009-ai-env`'s `scripts/usage-fetch.sh` writes — no `~/work/tools/` symlink is created or required for any of the three panes. The old dedicated `claude-codex-usage` repo that used to hold `cmux-usage-watch.sh` and its LaunchAgent is retired.
 
 ### zsh: append, not symlink
 `zsh/aliases.zsh` defines `cc`/`cct`. Instead of symlinking a whole `.zshrc` (which would clobber machine-specific setup like `anyenv`/`compinit`), `install.sh` idempotently appends a single marked source line (`# dotfiles-managed`) to the end of `~/.zshrc`. Existing `~/.zshrc` content is never modified or reordered, and re-running `install.sh` does not duplicate the line.
@@ -102,7 +103,7 @@ Apply changes:
 - Ghostty: `Cmd+Shift+,` (or restart)
 - zsh: `cc`/`cct` source line added to `~/.zshrc` if missing (restart the shell, or `source ~/.zshrc`)
 - cmux Dock guard: LaunchAgent (re)loaded automatically by `install.sh` (set `SKIP_LAUNCHCTL=1` to only generate the plist without touching `launchctl`, e.g. for testing)
-- Usage stats (Claude/Codex usage bars, refresh LaunchAgent): install separately from the [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo's own `install.sh`
+- Usage stats: the Dock bars (`cmux-usage-watch.sh`) are installed by this repo's `install.sh` above; the cache-refresh LaunchAgent that feeds them is installed separately via the `takumi009-ai-env` repo's `scripts/install-usage-fetch.sh`
 
 ---
 
@@ -116,7 +117,7 @@ Hammerspoon configuration for controlling AI terminals with Keychron mouse butto
 - `prefix + arrow` creates directional splits, and `Shift + arrow` moves between panes
 - Always displays Claude / Codex usage in the status bar
 
-> Warning: The status bar references `tmux-usage.sh` from a separate `claude-codex-usage` repository via a hardcoded absolute path in `status-right`. The bar will not appear unless that repository exists at the exact path baked into `tmux/tmux.conf`; adjust the path there for your own machine.
+> Warning: The status bar references `tmux-usage.sh` from the old, now-retired `claude-codex-usage` repository via a hardcoded absolute path in `status-right`. `tmux/tmux.conf` has not been updated for this retirement yet (out of scope for the Dock-usage-pane migration); the bar will not appear until that path is fixed or the segment is removed. Not currently used (no active tmux usage), so this has been left as-is.
 
 ### ghostty/
 - Catppuccin Mocha theme and `macos-option-as-alt` (Option shortcuts for Claude Code)
@@ -124,7 +125,7 @@ Hammerspoon configuration for controlling AI terminals with Keychron mouse butto
 - Ghostty does not support end-of-line comments (write comments on their own lines)
 
 ### cmux/
-Integration with the [`cmux`](https://cmux.com) terminal: notification filtering (`cmux.json`), four Dock status panes (Usage/Project/Task/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Project pane's project/external-brain display. The Usage pane's rendering script and its refresh LaunchAgent live in the separate [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) repo. See [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) for the LaunchAgent that automatically repairs a degraded Dock after cmux relaunches.
+Integration with the [`cmux`](https://cmux.com) terminal: notification filtering (`cmux.json`), four Dock status panes (Usage/Project/Task/System, wired via `dock.json`), an Agent Teams launcher (`cmux-teams` -> `claude-teams-launch.sh`), and pane-layout helpers. See [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) for the Project pane's project/external-brain display. The Usage pane's rendering script (`cmux-usage-watch.sh`) is bundled in this repo; its cache-refresh LaunchAgent lives in the separate `takumi009-ai-env` repo (`scripts/usage-fetch.sh`, LaunchAgent `com.takumi009.usage-fetch`) — the old dedicated `claude-codex-usage` repo is retired. See [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) for the LaunchAgent that automatically repairs a degraded Dock after cmux relaunches.
 
 ### zsh/
 `cc` (`cd ~/Claude && claude`) and `cct` (`cd ~/Claude && cmux claude-teams ...`, with cmux notification-hook and `--teammate-mode in-process` injection unless the caller already passed one of those flags). See [zsh: append, not symlink](#zsh-append-not-symlink) above for how it gets wired into `~/.zshrc`.
@@ -145,7 +146,7 @@ lua hammerspoon/tests/logic_spec.lua
 lua hammerspoon/tests/nape_pro_smoke_spec.lua
 ```
 
-(Usage-tracking tests live in the separate `claude-codex-usage` repo's own `test/test.sh`.)
+(`cmux-usage-watch.sh`'s Dock-rendering tests live in this repo's `tests/test-cmux-dock-json.sh`; the cache-refresh side's tests live in the separate `takumi009-ai-env` repo. The old dedicated `claude-codex-usage` repo and its `test/test.sh` are retired.)
 
 ---
 
@@ -171,10 +172,11 @@ AI 作業（Claude Code / Codex）まわりの macOS 設定ファイル集。
 dotfiles/
 ├── cmux/                          cmux（AI端末マルチプレクサ）統合
 │   ├── cmux.json                  cmuxアプリ設定: 通知フィルタ
-│   ├── dock.json                  Dockペイン定義: Usage / Project / Task / System（Usageのスクリプトは別リポジトリclaude-codex-usage側）
+│   ├── dock.json                  Dockペイン定義: Usage / Project / Task / System
 │   ├── claude-cmux-hooks.json     Claude Code フック（ターン完了通知・feedログ等）。--settingsで注入
 │   ├── claude-teams-launch.sh     cmuxを起動しAgent Teamsの「Supervisor」ワークスペースを開始/復帰
 │   ├── claude-teams-entry.sh      claude-teams-launch.shから呼ばれるセッション選択（新規/再開）
+│   ├── cmux-usage-watch.sh        Dockペイン: Claude/Codex使用率バー（takumi009-ai-envのusage-fetch.shが書くキャッシュJSONを読む）
 │   ├── cmux-system-watch.sh       Dockペイン: CPU/GPU/RAM/電力（macmon経由）
 │   ├── cmux-feed-watch.sh         Dockペイン: cmuxワークストリームの簡易フィード表示
 │   ├── cmux-next-watch/           Dockペイン: プロジェクト横断「次アクション」＋外部脳ヘルス
@@ -211,7 +213,7 @@ dotfiles/
 └── install.sh                     インストーラ: 設定ごとにsymlink、またはappend（zsh）
 ```
 
-使用率トラッキング（`claude-cache.json`/`codex-cache.json`・refresh用LaunchAgent・tmuxステータスバー表示・`dock.json`のUsageペインが起動する`cmux-usage-watch.sh`）は本リポジトリではなく、別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側に一本化されている。
+使用率トラッキングは2リポジトリに分かれている：本リポジトリにはDock描画スクリプト（`cmux/cmux-usage-watch.sh`・`dock.json`のUsageペインが起動）が同梱され、渡されたキャッシュJSON（`claude-cache.json`/`codex-cache.json`）を読むだけ。実際にClaude/Codexの使用率を取得しそのキャッシュを書くrefresh用LaunchAgentは、別リポジトリ`takumi009-ai-env`側の`scripts/usage-fetch.sh`（LaunchAgent `com.takumi009.usage-fetch`）にある。旧・専用リポジトリ`claude-codex-usage`は退役済み。
 
 ---
 
@@ -233,7 +235,7 @@ dotfiles/
 | `launchagents/com.takumi009.cmux-dock-guard.plist.template` | `~/Library/LaunchAgents/com.takumi009.cmux-dock-guard.plist` | 生成（`__DOTFILES_HOME__`をテンプレート展開）＋`launchctl`で(再)登録。`SKIP_LAUNCHCTL=1`で登録のみskip |
 | `zsh/aliases.zsh` | `~/.zshrc` 末尾 | **冪等追記**（symlinkではない。後述）|
 
-`cmux/` の一部スクリプト（`claude-cmux-hooks.json`・`claude-teams-entry.sh`・`cmux-system-watch.sh`・`cmux-feed-watch.sh`・`layout-enforce.sh`・`lib-layout.sh`・`show-review.sh`・`cmux-dock-guard/cmux-dock-guard.sh`・`cmux-next-watch/cmux-next-watch.sh`・`cmux-task-watch/cmux-task-watch.sh`）は個別にsymlinkされない。`dock.json`のコマンド・`cct`エイリアスの`--settings`・`claude-teams-launch.sh`の隣接スクリプト解決・`cmux-dock-guard` LaunchAgentの`ProgramArguments`から、リポジトリのパス（`~/work/dotfiles`に置かれている前提）を直接参照して使われる。`dock.json`のProject・Taskの2枠は `$HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh`・`$HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh` を直接指す。両ペインとも別リポジトリ`takumi009-ai-env`から供給側のフレームを受け取って描くだけで（詳細は`cmux/cmux-task-watch/README.md`・`cmux/cmux-next-watch/README.md`）、どちらも`~/work/tools/`のsymlinkは作らない・要らない。`dock.json`のUsageペインのcommandは別リポジトリ`claude-codex-usage`側の`cmux-usage-watch.sh`（`~/work/claude-codex-usage/cmux-usage-watch.sh`）を指しており、そのスクリプトと対応するLaunchAgentは本リポジトリには含まれない。
+`cmux/` の一部スクリプト（`claude-cmux-hooks.json`・`claude-teams-entry.sh`・`cmux-usage-watch.sh`・`cmux-system-watch.sh`・`cmux-feed-watch.sh`・`layout-enforce.sh`・`lib-layout.sh`・`show-review.sh`・`cmux-dock-guard/cmux-dock-guard.sh`・`cmux-next-watch/cmux-next-watch.sh`・`cmux-task-watch/cmux-task-watch.sh`）は個別にsymlinkされない。`dock.json`のコマンド・`cct`エイリアスの`--settings`・`claude-teams-launch.sh`の隣接スクリプト解決・`cmux-dock-guard` LaunchAgentの`ProgramArguments`から、リポジトリのパス（`~/work/dotfiles`に置かれている前提）を直接参照して使われる。`dock.json`のProject・Task・Usageの3枠は `$HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh`・`$HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh`・`$HOME/work/dotfiles/cmux/cmux-usage-watch.sh` を直接指す。Project・Taskは別リポジトリ`takumi009-ai-env`から供給側のフレームを受け取って描くだけ（詳細は`cmux/cmux-task-watch/README.md`・`cmux/cmux-next-watch/README.md`）、Usageは同じく`takumi009-ai-env`の`scripts/usage-fetch.sh`が書くキャッシュJSONを読むだけで、3枠ともに`~/work/tools/`のsymlinkは作らない・要らない。`cmux-usage-watch.sh`と対応するLaunchAgentを持っていた旧・専用リポジトリ`claude-codex-usage`は退役済み。
 
 ### zsh: symlinkではなく追記
 `zsh/aliases.zsh` は `cc`/`cct` を定義する。`.zshrc` 全体をsymlinkすると `anyenv`/`compinit` 等マシン固有の設定を壊すため、`install.sh` は目印コメント（`# dotfiles-managed`）付きのsource行1行だけを `~/.zshrc` 末尾へ冪等に追記する。既存の `~/.zshrc` 内容は一切変更・並べ替えせず、再実行しても二重追記しない。
@@ -254,7 +256,7 @@ cd ~/work/dotfiles
 - Ghostty: `Cmd+Shift+,`（または再起動）
 - zsh: `cc`/`cct` のsource行が無ければ `~/.zshrc` に追記済み（シェル再起動、または `source ~/.zshrc`）
 - cmux Dock guard: LaunchAgentは`install.sh`が自動で(再)登録（`SKIP_LAUNCHCTL=1`でplist生成のみ・登録skip。テスト用）
-- 使用率まわり（Claude/Codex使用率バー・refresh用LaunchAgent）: 別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 自身の `install.sh` で別途導入
+- 使用率まわり: Dockバー（`cmux-usage-watch.sh`）は上記の本リポジトリの`install.sh`で導入済み。バーへキャッシュを供給するrefresh用LaunchAgentは別リポジトリ`takumi009-ai-env`の`scripts/install-usage-fetch.sh`で別途導入
 
 ---
 
@@ -268,7 +270,7 @@ Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。
 - `prefix + 矢印` で方向分割、`Shift + 矢印` でペイン移動
 - Claude / Codex の使用率をステータスバーに常時表示
 
-> ⚠️ ステータスバーは別リポジトリ `claude-codex-usage` の `tmux-usage.sh` を、`tmux/tmux.conf` にハードコードされた絶対パスで参照する（`status-right`）。そのリポジトリがそのパスに無いとバーが出ない。自分の環境では `tmux/tmux.conf` 側のパスを書き換えること。
+> ⚠️ ステータスバーは旧・退役済みリポジトリ `claude-codex-usage` の `tmux-usage.sh` を、`tmux/tmux.conf` にハードコードされた絶対パスで参照する（`status-right`）。この退役に伴う`tmux/tmux.conf`側の整理は今回の対応範囲外（Dock Usageペイン移設のスコープ外）でまだ未着手。tmuxは現状使用していないため、パスが無いままバーが出ない状態を放置している。
 
 ### ghostty/
 - テーマ Catppuccin Mocha、`macos-option-as-alt`（Claude Code の Option ショートカット）
@@ -276,7 +278,7 @@ Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。
 - ※ Ghostty は行末コメント非対応（コメントは独立行に書く）
 
 ### cmux/
-[`cmux`](https://cmux.com) ターミナルとの統合。通知フィルタ（`cmux.json`）、4つのDockステータスペイン（Usage/Project/Task/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Projectペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプトと対応するrefresh用LaunchAgentは別リポジトリ [`claude-codex-usage`](https://github.com/Takumi00Nine/claude-codex-usage) 側にある。cmux再起動後にDockが壊れたままにならないよう自動修復するLaunchAgentの詳細は [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) 参照。
+[`cmux`](https://cmux.com) ターミナルとの統合。通知フィルタ（`cmux.json`）、4つのDockステータスペイン（Usage/Project/Task/System、`dock.json`で配線）、Agent Teamsランチャー（`cmux-teams` → `claude-teams-launch.sh`）、ペインレイアウト補助スクリプト群。Projectペインの詳細は [`cmux/cmux-next-watch/README.md`](cmux/cmux-next-watch/README.md) 参照。Usageペインの描画スクリプト（`cmux-usage-watch.sh`）は本リポジトリに同梱。対応するrefresh用LaunchAgentは別リポジトリ`takumi009-ai-env`側（`scripts/usage-fetch.sh`・LaunchAgent `com.takumi009.usage-fetch`）にある。旧・専用リポジトリ`claude-codex-usage`は退役済み。cmux再起動後にDockが壊れたままにならないよう自動修復するLaunchAgentの詳細は [`cmux/cmux-dock-guard/README.md`](cmux/cmux-dock-guard/README.md) 参照。
 
 ### zsh/
 `cc`（`cd ~/Claude && claude`）と `cct`（`cd ~/Claude && cmux claude-teams ...`。呼び出し側が該当フラグを渡していなければcmux通知フックと`--teammate-mode in-process`を注入）を定義。`~/.zshrc` への配線方式は上の[「zsh: symlinkではなく追記」](#zsh-symlinkではなく追記)参照。
@@ -297,7 +299,7 @@ lua hammerspoon/tests/logic_spec.lua
 lua hammerspoon/tests/nape_pro_smoke_spec.lua
 ```
 
-（使用率まわりのテストは別リポジトリ`claude-codex-usage`自身の`test/test.sh`にある。）
+（`cmux-usage-watch.sh`のDock描画テストは本リポジトリの`tests/test-cmux-dock-json.sh`にある。キャッシュ取得側のテストは別リポジトリ`takumi009-ai-env`にある。旧・専用リポジトリ`claude-codex-usage`と`test/test.sh`は退役済み。）
 
 ---
 

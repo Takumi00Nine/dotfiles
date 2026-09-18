@@ -172,15 +172,16 @@ link ghostty/start-tmux.sh           "$HOME/.config/ghostty/start-tmux.sh"
 link ghostty/cmux-session-cleanup.sh "$HOME/.config/ghostty/cmux-session-cleanup.sh"
 link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
 # cmux 本体設定・ドック定義（2026-08-06 追加。cmux.json=通知フィルタ等 /
-# dock.json=Usage・Project・Task・System の4コントロール。Project・Task の
-# 2枠は dock.json から dotfiles リポジトリ内の実体を直接指す＝v3で
+# dock.json=Usage・Project・Task・System の4コントロール。Project・Task・
+# Usage の3枠は dock.json から dotfiles リポジトリ内の実体を直接指す＝v3で
 # ~/work/tools/ 経由の symlink を廃止した（cmux-session-todo設計§28.2・
-# FR-76）。Usage コントロールが読む cmux-usage-watch.sh は
-# claude-codex-usage リポジトリ側へ移設済み（2026-08-07）で、dotfiles側は
-# symlinkしない）
+# FR-76）。Usage コントロールが読む cmux-usage-watch.sh は旧
+# claude-codex-usage リポジトリ（退役済み）から本リポジトリへ取り込み済み
+# （2026-09-18）。キャッシュ JSON の取得は takumi009-ai-env 側の
+# usage-fetch.sh が担う＝dotfiles 側はあくまで描画のみで symlinkしない）
 link cmux/cmux.json                  "$HOME/.config/cmux/cmux.json"
 link cmux/dock.json                  "$HOME/.config/cmux/dock.json"
-chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh" "$DIR/cmux/cmux-next-watch/cmux-next-watch.sh" "$DIR/cmux/cmux-dock-guard/cmux-dock-guard.sh"
+chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh" "$DIR/cmux/cmux-next-watch/cmux-next-watch.sh" "$DIR/cmux/cmux-dock-guard/cmux-dock-guard.sh" "$DIR/cmux/cmux-usage-watch.sh"
 
 append_zsh_aliases_source
 install_cmux_dock_guard_launchagent
@@ -196,7 +197,9 @@ Done. Apply each config:
   - cmux Dock guard: LaunchAgent (re)loaded above, or skipped/WARNed;
                  watches for cmux relaunches and repairs a degraded
                  Dock automatically. Log: ~/.local/state/cmux-dock-guard/
-  - Usage stats: not managed by this repo. See the separate
-                 claude-codex-usage repo's own install.sh for the
-                 refresh LaunchAgent + tmux/cmux usage rendering.
+  - Usage stats: Dock rendering (cmux-usage-watch.sh) is bundled in
+                 this repo now. The cache-refresh LaunchAgent lives in
+                 the separate takumi009-ai-env repo's
+                 scripts/install-usage-fetch.sh (the old
+                 claude-codex-usage repo is retired).
 EOF
