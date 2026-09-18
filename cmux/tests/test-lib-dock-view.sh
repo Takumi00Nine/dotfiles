@@ -190,6 +190,37 @@ if [ -s "$HANG_PIDS" ]; then
 fi
 assert_eq "子孫が残らない（記録した全PIDがkill -0に失敗する＝孤児ゼロ）" "0" "$orphan_count"
 
+echo "=== run_with_timeout補強: TERMを無視する子孫がいてもコマンド置換がブロックされず子孫も残らない（cmux/lib-model-view.sh側の同型回帰の写し・MAJOR-2追随） ==="
+# TERM無視の子孫（trap '' TERM）が標準出力のパイプ書き込み端を握ったまま
+# 残ると、wait後にKILLで掃除しない実装ではcmd_pid自体がTERMで終了しても
+# 呼び出し元の command substitution（$(...)）がEOF待ちで子孫のsleep終了
+# （60秒後）までブロックする＝上の「子孫が残らない」検査（TERM無視なし）
+# では検出できない実害。elapsed（上の「打ち切りが効く」と同じ検査）が
+# その実害を直接捉える。
+TERM_IGNORE_PID_FILE="$WORKDIR/term_ignore_grandchild_pid"
+rm -f "$TERM_IGNORE_PID_FILE"
+t0=$(date +%s)
+out_term="$(run_with_timeout 1 bash -c '
+  ( trap "" TERM; sleep 60 ) &
+  echo "$!" >> "'"$TERM_IGNORE_PID_FILE"'"
+  sleep 60
+')"
+t1=$(date +%s)
+elapsed_term=$(( t1 - t0 ))
+assert_true "TERM無視の子孫がいてもコマンド置換が4秒未満で戻る（fd待ちでブロックされない）" \
+  "$([ "$elapsed_term" -le 4 ] && echo 1 || echo 0)"
+assert_eq "コマンド置換内の出力は空（打ち切りなので）" "" "$out_term"
+sleep 1.5
+grandchild_pid="$(cat "$TERM_IGNORE_PID_FILE" 2>/dev/null)"
+assert_true "子孫PIDが記録されている（検査自体が空振りでない）" \
+  "$([ -n "$grandchild_pid" ] && echo 1 || echo 0)"
+if [ -n "$grandchild_pid" ] && kill -0 "$grandchild_pid" 2>/dev/null; then
+  kill -9 "$grandchild_pid" 2>/dev/null
+  assert_eq "TERM無視の子孫がタイムアウト後に生存しない（elapsedが主検査・本assertは補助）" "生存しない" "生存した"
+else
+  assert_eq "TERM無視の子孫がタイムアウト後に生存しない（elapsedが主検査・本assertは補助）" "生存しない" "生存しない"
+fi
+
 echo "=== 縮小の確認（§31.5＝sanitize_str・sanitize_linesは描画側から削除済み） ==="
 assert_false "sanitize_str は削除済み（未定義）" "$(type sanitize_str >/dev/null 2>&1 && echo 1 || echo 0)"
 assert_false "sanitize_lines は削除済み（未定義）" "$(type sanitize_lines >/dev/null 2>&1 && echo 1 || echo 0)"

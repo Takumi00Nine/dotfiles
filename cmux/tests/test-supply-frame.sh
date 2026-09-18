@@ -22,6 +22,13 @@ WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/test-supply-frame.XXXXXX")" || {
 }
 trap 'rm -rf "$WORKDIR"' EXIT
 
+# AC-122(d)のTMPDIRサンプリングが実launchd常駐と同じ${TMPDIR:-/tmp}を
+# 見て衝突する同型の露出（設計 F-79・DT-15の同乗）。WORKDIRを作った後に
+# 隔離用のサブディレクトリへTMPDIRを差し替える（自己参照回避のため
+# 順序は変えない）。
+mkdir -p "$WORKDIR/tmp"
+export TMPDIR="$WORKDIR/tmp"
+
 PASS=0
 FAIL=0
 
@@ -77,8 +84,8 @@ echo "=== validate_frame（正常系・境界・P-23/P-24） ==="
 mk_stub_P6_task "$WORKDIR/p6task"
 "$WORKDIR/p6task" --frame > "$WORKDIR/p6task.raw"
 validate_frame Task "$WORKDIR/p6task.raw" "$WORKDIR/p6task.model"
-assert_eq "P-6 Task は通常(rc=0)" "0" "$?"
-assert_eq "P-6 Task の本体行数は8" "8" "$(wc -l < "$WORKDIR/p6task.model" | tr -d ' ')"
+assert_eq "AC-134④: P-6′ Task は通常(rc=0)" "0" "$?"
+assert_eq "P-6′ Task の本体行数は6" "6" "$(wc -l < "$WORKDIR/p6task.model" | tr -d ' ')"
 
 mk_stub_P6_project "$WORKDIR/p6proj" 5 6 7
 "$WORKDIR/p6proj" --frame > "$WORKDIR/p6proj.raw"
@@ -95,6 +102,15 @@ assert_eq "P-6 Project は通常(rc=0)" "0" "$?"
 validate_frame Project "$WORKDIR/p6proj_empty.raw" "$WORKDIR/p6proj_empty.model"
 assert_eq "空のProjectフレーム(P*B*とも0行)は通常(rc=0・検証1巡目#8の回帰)" "0" "$?"
 assert_eq "空のProjectフレームの本体行数は0" "0" "$(wc -l < "$WORKDIR/p6proj_empty.model" | tr -d ' ')"
+
+# AC-134③: Project要求で#Vをcmux-dock-frame/2にしたP-6(Project)→版ちがい
+{
+  printf '#V\tcmux-dock-frame/2\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/ac134c.raw"
+validate_frame Project "$WORKDIR/ac134c.raw" "$WORKDIR/ac134c.model"
+assert_eq "AC-134③: Project要求で#Vが/2は版ちがい(rc=2)" "2" "$?"
 
 mk_stub_P23 "$WORKDIR/p23"
 "$WORKDIR/p23" --frame > "$WORKDIR/p23.raw"
@@ -120,16 +136,9 @@ assert_eq "P-25b(ちょうど1000行)は受理(rc=0・AC-122②)" "0" "$?"
 
 echo "=== validate_frame（DT-12・正当な空欄を含むフレーム） ==="
 
-{
-  printf '#V\tcmux-dock-frame/1\tTask\n'
-  # ヘッダーの分数は「完了した版数/版数」(ここは1/1)。版自身の分数(3/3)とは別物。
-  printf 'H\t✅\tcmux-session-todo\t全版完了\t\t1/1\n'   # 版名が空（全版完了時の既定）
-  printf 'V\tv1\t✅\t3/3\n'
-  printf 'X\t-\n'
-  printf 'E\t3\n'
-} > "$WORKDIR/dt12_h.raw"
-validate_frame Task "$WORKDIR/dt12_h.raw" "$WORKDIR/dt12_h.model"
-assert_eq "DT-12: Hの空の版名を含む正当フレームは受理" "0" "$?"
+# v4: TaskのH行が廃止されたのでTask側の陽性空欄の対象は無くなった
+# （Hの空の先導語・空の版名が消えた）。Projectの空next値だけが残る
+# （述語は変わらない＝§39.7.2）。
 
 {
   printf '#V\tcmux-dock-frame/1\tProject\n'
@@ -148,12 +157,17 @@ else
 fi
 assert_true "DT-12: 欄の分解に while IFS=\$'\\t' read が使われていない（静的・実コード行のみ）" "$DT12_STATIC"
 
-echo "=== validate_frame（45サブID・AC-111・P-4は版ちがい） ==="
+echo "=== validate_frame（48サブID・AC-111・P-4/P-31は版ちがい） ==="
 
 mk_stub_P4 "$WORKDIR/p4" Task
 "$WORKDIR/p4" --frame > "$WORKDIR/p4.raw"
 validate_frame Task "$WORKDIR/p4.raw" "$WORKDIR/p4.model"
 assert_eq "P-4(版が未知)はAI環境 版ちがい相当(rc=2)" "2" "$?"
+
+mk_stub_P31 "$WORKDIR/p31"
+"$WORKDIR/p31" --frame > "$WORKDIR/p31.raw"
+validate_frame Task "$WORKDIR/p31.raw" "$WORKDIR/p31.model"
+assert_eq "P-31(Task種別でcmux-dock-frame/1・v3形)はAI環境 版ちがい相当(rc=2)" "2" "$?"
 
 VIOLATION_FAIL=0
 IMPLEMENTED_IDS=()
@@ -184,7 +198,7 @@ for id in "${SUPPLY_VIOLATION_IDS[@]}"; do
     echo "  違反していないID: $id (rc=$rc)"
   fi
 done
-assert_eq "45サブIDすべてが応答なし(rc=3)になる" "0" "$VIOLATION_FAIL"
+assert_eq "48サブIDすべてが応答なし(rc=3)になる" "0" "$VIOLATION_FAIL"
 
 VARIANT_FAIL=0
 for id in "${SUPPLY_VIOLATION_VARIANTS[@]}"; do
@@ -198,8 +212,8 @@ assert_eq "P-14b/P-14cの内側の変種(UTF-8状態機械の全分岐)がすべ
 
 EXPECT_SORTED="$(printf '%s\n' "${SUPPLY_VIOLATION_IDS[@]}" | sort -u)"
 ACTUAL_SORTED="$(printf '%s\n' "${IMPLEMENTED_IDS[@]}" | sort -u)"
-assert_eq "AC-111: 実装したケースのサブID集合が45件の集合と完全一致" "$EXPECT_SORTED" "$ACTUAL_SORTED"
-assert_eq "サブID集合はちょうど45件" "45" "$(printf '%s\n' "${SUPPLY_VIOLATION_IDS[@]}" | sort -u | wc -l | tr -d ' ')"
+assert_eq "AC-111: 実装したケースのサブID集合が48件の集合と完全一致" "$EXPECT_SORTED" "$ACTUAL_SORTED"
+assert_eq "サブID集合はちょうど48件" "48" "$(printf '%s\n' "${SUPPLY_VIOLATION_IDS[@]}" | sort -u | wc -l | tr -d ' ')"
 
 echo "=== DT-8（判定順の分離） ==="
 

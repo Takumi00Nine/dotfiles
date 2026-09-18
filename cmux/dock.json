@@ -14,7 +14,7 @@
     {
       "id": "task",
       "title": "Task",
-      "command": "$HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh"
+      "command": "CMUX_DOCK_MAX_COLS=35 $HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh"
     },
     {
       "id": "system",

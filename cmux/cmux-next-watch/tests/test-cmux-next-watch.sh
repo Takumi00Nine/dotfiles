@@ -21,6 +21,13 @@ WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/test-cmux-next-watch.XXXXXX")" || {
 }
 trap 'rm -rf "$WORKDIR"' EXIT
 
+# AC-123のTMPDIR集合比較が実launchd常駐(cmux-task-watch/cmux-next-watch)の
+# 同時ティックと衝突する時限フレーク対策（設計 F-79・DT-15・D-v4-10で
+# task側と同じ巡でnext-watch側も隔離）。WORKDIRを作った後に隔離用の
+# サブディレクトリへTMPDIRを差し替える（自己参照回避のため順序は変えない）。
+mkdir -p "$WORKDIR/tmp"
+export TMPDIR="$WORKDIR/tmp"
+
 PASS=0
 FAIL=0
 assert_eq() {

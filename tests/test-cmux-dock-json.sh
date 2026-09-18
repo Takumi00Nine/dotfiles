@@ -33,6 +33,31 @@ assert_true() {
   if [ "$cond" = "1" ]; then pass "$desc"; else fail_case "$desc"; fi
 }
 
+# strip_env_prefix: command文字列の先頭に付く0個以上の "NAME=値" 環境変数接頭辞
+# (POSIXの識別子規則 [A-Za-z_][A-Za-z0-9_]*=、値に空白は想定しない)を読み飛ばし、
+# 実行ファイル本体以降をstdoutへ返す(例: "CMUX_DOCK_MAX_COLS=35 .../cmux-task-watch.sh"
+# -> ".../cmux-task-watch.sh")。接頭辞と本体の間が連続空白・TABでも、剥がした
+# 直後に残る先頭の空白類を落としてから次のトークン判定へ進む。
+strip_env_prefix() {
+  local cmd="$1" first_token name leading
+  while :; do
+    first_token="${cmd%% *}"
+    case "$first_token" in
+      *=*)
+        name="${first_token%%=*}"
+        if [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ "$first_token" != "$cmd" ]; then
+          cmd="${cmd#* }"
+          leading="${cmd%%[![:space:]]*}"
+          [ -n "$leading" ] && cmd="${cmd#"$leading"}"
+          continue
+        fi
+        ;;
+    esac
+    break
+  done
+  printf '%s' "$cmd"
+}
+
 if ! command -v jq >/dev/null 2>&1; then
   echo "SKIP: jq が無いためこのテストは実行できません"
   exit 0
@@ -48,26 +73,40 @@ echo "=== 前提: DOTFILES_DIR=$DOTFILES_DIR の dock.json が読める ==="
 
 echo "=== (a) dock.jsonの全controlのcommand(\$HOME展開後)が実在し実行可能 ==="
 {
+  assert_true "strip_env_prefix: 複数の環境変数接頭辞(A=1 B_2=x)を剥がして実行ファイルだけ残す" \
+    "$([ "$(strip_env_prefix 'A=1 B_2=x $HOME/work/dotfiles/x')" = '$HOME/work/dotfiles/x' ] && echo 1 || echo 0)"
+  assert_true "strip_env_prefix: 接頭辞のみ(A=1)で本体が無ければそのまま返す" \
+    "$([ "$(strip_env_prefix 'A=1')" = 'A=1' ] && echo 1 || echo 0)"
+  assert_true "strip_env_prefix: 先頭が数字(1A=1)は識別子でないため剥がさずそのまま返す" \
+    "$([ "$(strip_env_prefix '1A=1 cmd')" = '1A=1 cmd' ] && echo 1 || echo 0)"
+  assert_true "strip_env_prefix: 接頭辞の後ろが連続空白(2個)でも先頭空白を落として実行ファイルだけ残す" \
+    "$([ "$(strip_env_prefix 'A=1  $HOME/work/dotfiles/x')" = '$HOME/work/dotfiles/x' ] && echo 1 || echo 0)"
+
   ids="$(jq -r '.controls[].id' "$DOCK_JSON" 2>/dev/null)"
   while IFS= read -r id; do
     [ -z "$id" ] && continue
     raw_cmd="$(jq -r --arg id "$id" '.controls[] | select(.id==$id) | .command' "$DOCK_JSON")"
+    cmd="$(strip_env_prefix "$raw_cmd")"
     # "$HOME/work/dotfiles" の接頭辞だけ DOTFILES_DIR に読み替える
     # (worktreeで走らせたとき、実HOME配下の本体リポジトリではなくworktree自身を
     # 指すようにするため。それ以外の$HOME展開は通常のシェル展開に任せる)。
-    case "$raw_cmd" in
+    case "$cmd" in
       '$HOME/work/dotfiles/'*)
-        rel="${raw_cmd#\$HOME/work/dotfiles/}"
+        rel="${cmd#\$HOME/work/dotfiles/}"
         resolved="$DOTFILES_DIR/$rel"
         ;;
       *)
-        resolved="$(eval echo "$raw_cmd")"
+        resolved="$(eval echo "$cmd")"
         ;;
     esac
     assert_true "control[$id]のcommandが実在するファイル ($resolved)" \
       "$([ -f "$resolved" ] && echo 1 || echo 0)"
     assert_true "control[$id]のcommandが実行可能 ($resolved)" \
       "$([ -x "$resolved" ] && echo 1 || echo 0)"
+    if [ "$id" = "task" ]; then
+      assert_true "control[task]のcommand先頭の環境変数接頭辞(例:CMUX_DOCK_MAX_COLS=35)を剥がした後の実行ファイルがcmux-task-watch.shの実パスと一致 ($resolved)" \
+        "$([ "$resolved" = "$DOTFILES_DIR/cmux/cmux-task-watch/cmux-task-watch.sh" ] && echo 1 || echo 0)"
+    fi
   done <<< "$ids"
 }
 

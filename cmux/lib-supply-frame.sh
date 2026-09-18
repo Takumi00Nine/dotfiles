@@ -18,7 +18,12 @@
 #     # 流儀＝cleanup() は他の一時物と同じ扱いでこれも消せる）。
 #   fi
 
-CMUX_FRAME_VERSION="cmux-dock-frame/1"
+# 契約の版は種別ごとに独立させる（設計 v4 §39.3 D-v4-1）。Task は行文法を
+# 非互換で上げ（H/X廃止・V/C/D新設）cmux-dock-frame/2、Project は不変で
+# cmux-dock-frame/1 のまま。validate_frame が種別からこの2定数を引き、
+# awkへ -v expect_ver=… として渡す（L290付近の旧リテラル比較を置換）。
+CMUX_FRAME_VERSION_TASK="cmux-dock-frame/2"
+CMUX_FRAME_VERSION_PROJECT="cmux-dock-frame/1"
 
 # is_number の複製（複製元: cmux/lib-dock-view.sh の is_number）。この
 # ファイルは「LIB_DIR/lib-dock-view.sh を先に source 済み」という暗黙の
@@ -287,7 +292,7 @@ END {
   if (fld[1,1] == "" || fld[1,2] == "" || fld[1,3] == "") exit 3
 
   version = fld[1,2]; vkind = fld[1,3]
-  if (version != "cmux-dock-frame/1") exit 2
+  if (version != expect_ver) exit 2
 
   if (vkind != expect_kind) exit 3
   if (vkind != "Task" && vkind != "Project") exit 3
@@ -315,90 +320,75 @@ END {
     exit 1
   }
   for (i = 2; i < eidx; i++) if (fld[i, 1] == "R") exit 3
-  # body_n==0 は Task では #5 の必須 H 行が無いことになり fld[2,1]!="H" で
-  # 落ちる。Project は「P*・B*ともに0行以上」が正当（FR-82 #5）なので、
-  # ここでは種別を問わず一律には落とさない（検証1巡目 #8）。
+  # body_n==0 は Task では必須のD行が無いことになりD行探索の
+  # pos>=eidx検査で落ちる（v4・§39.3）。Project は「P*・B*ともに0行以上」が
+  # 正当（FR-82 #5）なので、ここでは種別を問わず一律には落とさない
+  # （検証1巡目 #8）。
 
   last_num = 0
 
   if (vkind == "Task") {
-    if (fld[2, 1] != "H") exit 3
-    if (raw_nf[2] != 6) exit 3
-    h_sym = fld[2,2]; h_name = fld[2,3]; h_lead = fld[2,4]; h_ver = fld[2,5]; h_frac = fld[2,6]
-    if (h_sym == "" || h_name == "" || h_frac == "") exit 3
-    if (h_sym != "▶" && h_sym != "✅" && h_sym != "・") exit 3
-
-    vn = 0; cn = 0
-    pos = 3
+    # v4行文法（設計 §39.3）: #V → (V → C*)* → D → E。H/Xは廃止。
+    # Vの欄=番号・版名・分数d/t・▶欄(cur/-)・展開欄(open/fold)。
+    # Cの欄=状態・本文（直前のVに従属）。Dの欄=完了した版の件数（ちょうど1行）。
+    vn = 0
+    pos = 2   # H行が廃止されたv4ではV(またはV0行時はD)が本体先頭
+    cur_n = 0
     while (pos < eidx && fld[pos, 1] == "V") {
       vn++
-      if (raw_nf[pos] != 4) exit 3
-      vname[vn] = fld[pos, 2]; vsym[vn] = fld[pos, 3]; vfrac[vn] = fld[pos, 4]
-      if (vname[vn] == "" || vsym[vn] == "" || vfrac[vn] == "") exit 3
-      if (vsym[vn] != "▶" && vsym[vn] != "✅" && vsym[vn] != "・") exit 3
-      parse_frac(vfrac[vn])
-      if (!FRAC_OK) exit 3
-      vd[vn] = FRAC_D; vt[vn] = FRAC_T
-      if (vt[vn] == 0) { if (vsym[vn] != "・") exit 3 }
-      else if (vd[vn] == vt[vn]) { if (vsym[vn] != "✅") exit 3 }
-      else { if (vsym[vn] != "▶" && vsym[vn] != "・") exit 3 }
-      pos++
-    }
-    slash_seen = 0
-    while (pos < eidx && fld[pos, 1] == "C") {
-      cn++
-      if (raw_nf[pos] != 4) exit 3
-      cnum = fld[pos, 2]; cstate = fld[pos, 3]; cbody = fld[pos, 4]
-      if (cnum == "" || cbody == "") exit 3
-      if (cstate != "[x]" && cstate != "[/]" && cstate != "[ ]") exit 3
-      if (!is_uint(cnum)) exit 3
-      nval = cnum + 0
+      if (raw_nf[pos] != 6) exit 3
+      vnum[vn] = fld[pos, 2]; vname[vn] = fld[pos, 3]; vfrac[vn] = fld[pos, 4]
+      varrow[vn] = fld[pos, 5]; vexp[vn] = fld[pos, 6]
+      if (vname[vn] == "") exit 3
+      if (varrow[vn] != "cur" && varrow[vn] != "-") exit 3
+      if (vexp[vn] != "open" && vexp[vn] != "fold") exit 3
+      if (!is_uint(vnum[vn])) exit 3
+      nval = vnum[vn] + 0
       if (nval < 1 || nval > 9999) exit 3
       if (nval <= last_num) exit 3
       last_num = nval
-      if (cstate == "[/]") slash_seen = 1
-      cst[cn] = cstate
-      pos++
-    }
-    if (pos != eidx - 1) exit 3
-    if (fld[pos, 1] != "X") exit 3
-    if (raw_nf[pos] != 2) exit 3
-    xval = fld[pos, 2]
-    if (xval == "") exit 3
-
-    if (xval == "-") {
-      if (cn != 0) exit 3
-      if (h_sym != "✅") exit 3
-      if (h_lead != "全版完了") exit 3
-      if (h_ver != "") exit 3
-      if (vn < 1) exit 3
-      done_v = 0
-      for (k = 1; k <= vn; k++) {
-        if (vsym[k] != "✅") exit 3
-        if (vt[k] >= 1 && vd[k] == vt[k]) done_v++
-      }
-      parse_frac(h_frac)
+      parse_frac(vfrac[vn])
       if (!FRAC_OK) exit 3
-      if (FRAC_D != done_v || FRAC_T != vn) exit 3
-      if (FRAC_D != FRAC_T) exit 3
-    } else {
-      if (!is_uint(xval)) exit 3
-      xn = xval + 0
-      if (xn < 1 || xn > vn) exit 3
-      if (vt[xn] == 0) exit 3
-      if (vd[xn] >= vt[xn]) exit 3
-      if (cn != vt[xn]) exit 3
-      xdone = 0
-      for (k = 1; k <= cn; k++) if (cst[k] == "[x]") xdone++
-      if (xdone != vd[xn]) exit 3
-      if (h_ver != vname[xn]) exit 3
-      if (h_frac != vfrac[xn]) exit 3
-      if (slash_seen) {
-        if (vsym[xn] != "▶" || h_sym != "▶" || h_lead != "") exit 3
+      vd[vn] = FRAC_D; vt[vn] = FRAC_T
+      if (vt[vn] >= 1 && vd[vn] == vt[vn]) exit 3   # 未完の版だけがVを持つ
+      if (varrow[vn] == "cur") cur_n++
+      pos++
+
+      cn = 0
+      while (pos < eidx && fld[pos, 1] == "C") {
+        cn++
+        if (raw_nf[pos] != 3) exit 3
+        cstate = fld[pos, 2]; cbody = fld[pos, 3]
+        if (cbody == "") exit 3
+        if (cstate != "[x]" && cstate != "[/]" && cstate != "[ ]") exit 3
+        cst[cn] = cstate
+        pos++
+      }
+      if (vexp[vn] == "open") {
+        if (cn != vt[vn]) exit 3
+        xdone = 0
+        for (k = 1; k <= cn; k++) if (cst[k] == "[x]") xdone++
+        if (xdone != vd[vn]) exit 3
       } else {
-        if (vsym[xn] != "・" || h_sym != "・" || h_lead != "次: ") exit 3
+        if (cn != 0) exit 3
       }
     }
+
+    if (vn >= 1) {
+      if (cur_n != 1) exit 3
+    } else {
+      if (cur_n != 0) exit 3
+    }
+
+    if (pos >= eidx) exit 3          # D行が無い
+    if (fld[pos, 1] != "D") exit 3
+    if (raw_nf[pos] != 2) exit 3
+    if (!is_uint(fld[pos, 2])) exit 3
+    dcount = fld[pos, 2] + 0
+    pos++
+    if (pos != eidx) exit 3          # Dの後にV/Cが続く・Dが2行、を弾く
+
+    if (vn < 1 && dcount == 0) exit 3   # V0行かつD0は違反（#12-A′）
   } else {
     pn = 0; bn = 0
     pos = 2
@@ -458,9 +448,14 @@ CMUX_AWK_EOF
 # 戻り値: 0=通常（MODELに本体行）／1=理由フレーム（MODELに理由文字列1行）
 #         ／2=版ちがい／3=契約違反（応答なしへ落とす）
 validate_frame() {
-  local kind="$1" raw="$2" model="$3"
+  local kind="$1" raw="$2" model="$3" expect_ver
+  if [ "$kind" = "Task" ]; then
+    expect_ver="$CMUX_FRAME_VERSION_TASK"
+  else
+    expect_ver="$CMUX_FRAME_VERSION_PROJECT"
+  fi
   LC_ALL=C tr '\000' '\001' < "$raw" \
-    | LC_ALL=C awk -v expect_kind="$kind" "$(_supply_frame_awk_program)" > "$model" 2>/dev/null
+    | LC_ALL=C awk -v expect_kind="$kind" -v expect_ver="$expect_ver" "$(_supply_frame_awk_program)" > "$model" 2>/dev/null
   local rc="${PIPESTATUS[1]:-$?}"
   return "$rc"
 }

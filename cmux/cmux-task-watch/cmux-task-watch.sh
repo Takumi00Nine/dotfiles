@@ -1,19 +1,20 @@
 #!/bin/bash
-# cmux Dock「Task」枠の描画（cmux-session-todo 設計 v3・C-18）。供給側
-# （ai-env の cmux-task-model.sh）が返す1ティック分のフレームを受け取って
-# 描くだけで、Vault・宣言記録・cmux を自分では一切読まない（FR-62・FR-64）。
-# 供給側が無い・応答しない・契約の版が合わないときは理由行1行へ縮退する
-# （FR-68）。呼び出し口は環境変数 CMUX_DOCK_SUPPLY_TASK で上書きできる
-# （既定はリポジトリ内の絶対パス）。
+# cmux Dock「Task」枠の描画（cmux-session-todo 設計 v4・§39.5）。供給側
+# （ai-env の cmux-task-model.sh）が返す1ティック分のフレーム（契約
+# cmux-dock-frame/2）を受け取って描くだけで、Vault・宣言記録・cmux を
+# 自分では一切読まない（FR-62・FR-64）。▶（今の版）・展開・番号はすべて
+# 供給側が決め、描画側はその値をそのまま描く。供給側が無い・応答しない・
+# 契約の版が合わないときは理由行1行へ縮退する（FR-68）。呼び出し口は
+# 環境変数 CMUX_DOCK_SUPPLY_TASK で上書きできる（既定はリポジトリ内の
+# 絶対パス）。
 #
-# 表示例（子行の番号は供給側が採番した値をそのまま描く＝FR-63）:
-#   ▶ cmux-session-todo  v2 1/3
-#   v1 ✅ 3/3
-#   v2 ▶ 1/3
-#    ├ 1 [x] 要件定義
-#    ├ 2 [/] 設計
-#    └ 3 [ ] 実装
-#   v3 ・ 0/4
+# 表示例（版番号・分数・▶・展開は供給側が決めた値をそのまま描く）:
+#   ▶ 1 v2                               1/3
+#      [x] 要件定義
+#      [/] 設計
+#      [ ] 実装
+#    2 v3                                0/4
+#   ── 完了 1 件 ✅
 #
 # 引数: （なし）＝常駐 / --once＝1フレーム色付きで出して終了 / --plain＝1フレーム
 # 平文で出して終了（--once と併用可・単独でも1回で終わる）。
@@ -53,11 +54,21 @@ ACCENT="${ESC}[38;5;114;1m"
 DEFAULT_C="${ESC}[38;5;252m"
 
 # --- フレーム由来のモデル（1ティックぶん・set -u 下の未初期化対策で空へ） --
+# v4（§39.5.1）: BL_* は「V行（Uの全版）と、その直後に従属するC行（openの
+# 版だけ）」をフレームの並びそのまま持つ。加えてDONE_N>=1のとき末尾に
+# "D"種別の1要素を足す（完了行・D-v4-5）。DIGITSはV行番号の最大値の桁数
+# （V0行なら1）。X・Hは無い（規則4）。
 FRAME_REASON=""
-MODEL_SLUG=""; MODEL_SYM=""; MODEL_LEADWORD=""; MODEL_VERNAME=""; MODEL_FRAC=""
-V_NAME=(); V_TOTAL=(); V_DONE=()
-BL_KIND=(); BL_A=(); BL_B=(); BL_C=()
-NR_BLIDX=(); NR_NUM=(); NR_STATE=(); NR_BODY=()
+BL_KIND=()      # "V"/"C"/"D"
+BL_NUM=()       # 版番号（V行のみ）
+BL_NAME=()      # 版名（V行のみ）
+BL_FRAC=()      # 分数d/t（V行のみ）
+BL_ARROW=()     # cur/-（V行のみ）
+BL_STATE=()     # x・/・(空白1)（C行のみ）
+BL_BODY=()      # 本文（C行のみ）
+BL_PARENT=()    # C行が従属するV行のBL_*上の添字（V/D行は-1）
+DONE_N=0
+DIGITS=1
 
 # lib-supply-frame.sh の run_supply/fetch_frame が見る一時物・PGID
 # （常駐の trap から cleanup() が同じ変数を見て後始末する＝設計 §31.3）。
@@ -65,247 +76,204 @@ SUPPLY_PGID=""; WATCH_PGID=""; RAW=""; RCF=""; DONE=""; TOUT=""; MODEL=""
 DRAWING=0
 
 # --- MODEL（lib-supply-frame.sh が検証済みの本体行）から表示モデルを
-# 組み立てる（設計 §31.4＝表示規則は1つも変えない。データの出どころだけが
-# Vault からフレームへ変わる）。$MODEL を1行ずつ読み、BL_*/NR_* を
-# load_model() 相当の形で埋める。
+# 組み立てる（設計 §39.5.1）。フレームの並びはそのまま画面の並びと同じ
+# （展開対象の版の直後にその子行が来る＝契約が保証する）ので、差し込み
+# 直しは不要。$MODEL を1行ずつ読み、BL_* をその並びのまま埋める。
 load_model_from_frame() {
-  MODEL_SLUG=""; MODEL_SYM=""; MODEL_LEADWORD=""; MODEL_VERNAME=""; MODEL_FRAC=""
-  BL_KIND=(); BL_A=(); BL_B=(); BL_C=()
-  NR_BLIDX=(); NR_NUM=(); NR_STATE=(); NR_BODY=()
+  BL_KIND=(); BL_NUM=(); BL_NAME=(); BL_FRAC=(); BL_ARROW=()
+  BL_STATE=(); BL_BODY=(); BL_PARENT=()
+  DONE_N=0
+  DIGITS=1
 
-  # フレームの並びは契約上 H→V*→C*→X で固定（§29.2）だが、画面は
-  # 「展開対象の版の直後にその子行を挟む」形（v2の記載順）を保つ。ここで
-  # 一度 V・C を別々の一時配列へ集め、X が指す版の直後へ子行を差し込んで
-  # BL_* を組み立て直す。
-  local line vn=0 cn=0 x_raw=""
-  local vname_a=() vsym_a=() vfrac_a=()
-  local cstate_a=() cbody_a=() cnum_a=()
+  local line cur_v_idx=-1 max_num=0
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     split_tsv "$line"
     case "${TSV_F[0]}" in
-      H)
-        MODEL_SYM="${TSV_F[1]}"
-        MODEL_SLUG="${TSV_F[2]}"
-        MODEL_LEADWORD="${TSV_F[3]}"
-        MODEL_VERNAME="${TSV_F[4]}"
-        MODEL_FRAC="${TSV_F[5]}"
-        ;;
       V)
-        vn=$(( vn + 1 ))
-        vname_a+=("${TSV_F[1]}")
-        vsym_a+=("${TSV_F[2]}")
-        vfrac_a+=("${TSV_F[3]}")
+        BL_KIND+=("V")
+        BL_NUM+=("${TSV_F[1]}")
+        BL_NAME+=("${TSV_F[2]}")
+        BL_FRAC+=("${TSV_F[3]}")
+        BL_ARROW+=("${TSV_F[4]}")
+        BL_STATE+=("")
+        BL_BODY+=("")
+        BL_PARENT+=("-1")
+        cur_v_idx=$(( ${#BL_KIND[@]} - 1 ))
+        if [ "${TSV_F[1]}" -gt "$max_num" ] 2>/dev/null; then
+          max_num="${TSV_F[1]}"
+        fi
         ;;
       C)
-        cn=$(( cn + 1 ))
-        cnum_a+=("${TSV_F[1]}")
-        cstate_a+=("${TSV_F[2]}")
-        cbody_a+=("${TSV_F[3]}")
+        BL_KIND+=("C")
+        BL_NUM+=("")
+        BL_NAME+=("")
+        BL_FRAC+=("")
+        BL_ARROW+=("")
+        case "${TSV_F[1]}" in
+          "[x]") BL_STATE+=("x") ;;
+          "[/]") BL_STATE+=("/") ;;
+          *)     BL_STATE+=(" ") ;;
+        esac
+        BL_BODY+=("${TSV_F[2]}")
+        BL_PARENT+=("$cur_v_idx")
         ;;
-      X)
-        x_raw="${TSV_F[1]}"
+      D)
+        DONE_N="${TSV_F[1]}"
         ;;
     esac
   done < "$MODEL"
 
-  local i j
-  for ((i = 0; i < vn; i++)); do
-    local is_expand=0
-    if [ -n "$x_raw" ] && [ "$x_raw" != "-" ] && [ "$x_raw" -eq $(( i + 1 )) ] 2>/dev/null; then
-      is_expand=1
-    fi
-    if [ "$is_expand" -eq 1 ]; then
-      BL_KIND+=("VE")
-    else
-      BL_KIND+=("VC")
-    fi
-    BL_A+=("${vsym_a[$i]}")
-    BL_B+=("${vname_a[$i]}")
-    BL_C+=("${vfrac_a[$i]}")
+  if is_number "${DONE_N:-}" && [ "$DONE_N" -ge 1 ]; then
+    BL_KIND+=("D")
+    BL_NUM+=(""); BL_NAME+=(""); BL_FRAC+=(""); BL_ARROW+=("")
+    BL_STATE+=(""); BL_BODY+=(""); BL_PARENT+=("-1")
+  fi
 
-    if [ "$is_expand" -eq 1 ]; then
-      for ((j = 0; j < cn; j++)); do
-        local st="${cstate_a[$j]}" kind_c stc
-        case "$st" in
-          "[x]") kind_c="CX"; stc="x" ;;
-          "[/]") kind_c="CS"; stc="/" ;;
-          *)     kind_c="CB"; stc=" " ;;
-        esac
-        BL_KIND+=("$kind_c")
-        BL_A+=("$stc")
-        BL_B+=("${cbody_a[$j]}")
-        BL_C+=("")
-        NR_BLIDX+=($(( ${#BL_KIND[@]} - 1 )))
-        NR_NUM+=("${cnum_a[$j]}")
-        NR_STATE+=("$stc")
-        NR_BODY+=("${cbody_a[$j]}")
-      done
-    fi
-  done
+  DIGITS="${#max_num}"
+  [ "$DIGITS" -lt 1 ] && DIGITS=1
 }
 
-# --- 描画パイプライン（設計 §31.4・表示規則は不変。v2 の実装をそのまま
-# 引き継ぐ）。--------------------------------------------------------------
+# --- 描画パイプライン（設計 §39.5.2）。-------------------------------------
 
-compose_field() {
-  local leadword="$1" vername="$2" frac="$3"
-  if [ -n "$vername" ]; then
-    printf '%s%s %s' "$leadword" "$vername" "$frac"
-  elif [ -n "$leadword" ]; then
-    printf '%s %s' "$leadword" "$frac"
-  else
-    printf '%s' "$frac"
-  fi
-}
-
-render_header_line() {
-  local sym="$1" name="$2" leadword="$3" vername="$4" frac="$5" cols="$6"
-  local field w_sym w_name w_field need name_disp
-  field="$(compose_field "$leadword" "$vername" "$frac")"
-  w_sym="$(disp_width "$sym")"
-  w_name="$(disp_width "$name")"
-  w_field="$(disp_width "$field")"
-  need=$(( w_sym + 1 + 2 + w_field ))
-
-  if [ "$cols" -le 0 ] || [ $(( need + w_name )) -le "$cols" ]; then
-    printf '%s %s  %s' "$sym" "$name" "$field"
-    return
-  fi
-
-  local avail_name=$(( cols - need ))
-  [ "$avail_name" -lt 10 ] && avail_name=10
-  name_disp="$(truncate_disp "$name" "$avail_name")"
-  w_name="$(disp_width "$name_disp")"
-  if [ $(( need + w_name )) -le "$cols" ]; then
-    printf '%s %s  %s' "$sym" "$name_disp" "$field"
-    return
-  fi
-
-  local w_lead w_frac avail_ver vername_disp full_w
-  w_lead="$(disp_width "$leadword")"
-  w_frac="$(disp_width "$frac")"
-  avail_ver=$(( cols - w_sym - 1 - 2 - w_name - w_lead - w_frac - 1 ))
-  [ "$avail_ver" -lt 0 ] && avail_ver=0
-  vername_disp="$(truncate_disp "$vername" "$avail_ver")"
-  field="$(compose_field "$leadword" "$vername_disp" "$frac")"
-  full_w=$(( w_sym + 1 + w_name + 2 + $(disp_width "$field") ))
-  if [ "$full_w" -le "$cols" ]; then
-    printf '%s %s  %s' "$sym" "$name_disp" "$field"
-    return
-  fi
-
-  printf '%s %s' "$sym" "$frac"
-}
-
+# 版行 = M + " " + num + " " + name_disp + pad + frac（規則5・D-v4-7）。
+# M は▶欄がcurなら▶、それ以外は空（幅0）。w_prefixはMの実際の表示幅から
+# 導く（disp_width(M) + DIGITS + 2）＝cur行はDIGITS+3・非cur行はDIGITS+2
+# （設計 §39.5.2）。
 render_version_line() {
-  local sym="$1" vername="$2" frac="$3" cols="$4"
-  local fixed w_fixed avail vername_disp
-  fixed=" $sym $frac"
+  local arrow="$1" num="$2" name="$3" frac="$4" digits="$5" cols="$6"
+  local m
+  if [ "$arrow" = "cur" ]; then m="▶"; else m=""; fi
+  local num_disp
+  num_disp="$(printf '%*d' "$digits" "$num")"
+
   if [ "$cols" -le 0 ]; then
-    printf '%s%s' "$vername" "$fixed"
+    printf '%s %s %s %s' "$m" "$num_disp" "$name" "$frac"
     return
   fi
-  w_fixed="$(disp_width "$fixed")"
-  avail=$(( cols - w_fixed ))
-  [ "$avail" -lt 0 ] && avail=0
-  vername_disp="$(truncate_disp "$vername" "$avail")"
-  printf '%s%s' "$vername_disp" "$fixed"
+
+  # w_mはM（▶か空）の表示幅・w_fracはfrac（"d/t"＝常にASCII数字と/だけ）の
+  # 表示幅。どちらもdisp_width（jq起動）を呼ばずシェル内で決まる（検証1
+  # 巡目#4＝版行1本あたりのjq起動を4回→2回（truncate_disp・name_dispの
+  # disp_widthだけ）に戻す）。
+  local w_m w_frac w_prefix
+  if [ "$arrow" = "cur" ]; then w_m=1; else w_m=0; fi
+  w_frac="${#frac}"
+  w_prefix=$(( w_m + digits + 2 ))
+
+  if [ "$cols" -lt $(( w_prefix + w_frac + 1 )) ]; then
+    local whole
+    whole="$(printf '%s %s %s' "$m" "$num_disp" "$frac")"
+    truncate_disp "$whole" "$cols"
+    return
+  fi
+
+  local avail=$(( cols - w_prefix - 1 - w_frac ))
+  local name_disp=""
+  if [ "$avail" -ge 1 ]; then
+    name_disp="$(truncate_disp "$name" "$avail")"
+  fi
+  local w_name
+  w_name="$(disp_width "$name_disp")"
+  local pad=$(( cols - w_prefix - w_name - w_frac ))
+  [ "$pad" -lt 1 ] && pad=1
+  local spaces
+  spaces="$(printf '%*s' "$pad" '')"
+  printf '%s %s %s%s%s' "$m" "$num_disp" "$name_disp" "$spaces" "$frac"
 }
 
+# 子行 = spaces(DIGITS+2) + "[" + s + "] " + truncate_disp(body, cols-(DIGITS+6))
 render_child_line() {
-  local arrow="$1" num="$2" state="$3" body="$4" cols="$5"
-  local fixed w_fixed avail body_disp
-  fixed=" ${arrow} ${num} [${state}] "
+  local state="$1" body="$2" digits="$3" cols="$4"
+  local prefix fixed
+  prefix="$(printf '%*s' $(( digits + 2 )) '')"
+  fixed="${prefix}[${state}] "
   if [ "$cols" -le 0 ]; then
     printf '%s%s' "$fixed" "$body"
     return
   fi
-  w_fixed="$(disp_width "$fixed")"
-  avail=$(( cols - w_fixed ))
+  local avail=$(( cols - digits - 6 ))
   [ "$avail" -lt 0 ] && avail=0
+  local body_disp
   body_disp="$(truncate_disp "$body" "$avail")"
   printf '%s%s' "$fixed" "$body_disp"
 }
 
+# 完了行 = truncate_disp("── 完了 " + n + " 件 ✅", cols)（Q-v4-4・D-v4-5）
+render_done_line() {
+  local n="$1" cols="$2"
+  local text="── 完了 ${n} 件 ✅"
+  if [ "$cols" -le 0 ]; then
+    printf '%s' "$text"
+    return
+  fi
+  truncate_disp "$text" "$cols"
+}
+
+# 高さのclamp（設計 §39.5.3・v3の骨格＝must-keep＋優先度で埋める＋表示順に
+# 並べ直す＋末尾に「…他N行」を保ち、優先度表をv4の行種別へ差し替える）。
+# K0=▶欄curの版行／K1=curの子行のうち[/]／K2=curの子行のうち[ ]／
+# K3=残り全部（curの[x]子行・他の版行とその子行・完了行）を表示順に。
+# rows==1はK0だけ（省略行なし）。cur_idxが必ず見つかることは、
+# 「n<=rowsなら既に全行を返している」ことから保証される（DT-16）。
 clamp_lines() {
   local rows="$1"
   local n=${#BL_KIND[@]}
   KEEP_IDX=()
   OMIT_N=-1
-  HEADER_ONLY=0
 
-  if [ "$rows" -le 0 ]; then
+  if [ "$rows" -le 0 ] || [ "$n" -le "$rows" ]; then
     local i
     for ((i = 0; i < n; i++)); do KEEP_IDX+=("$i"); done
     return
   fi
+
+  local cur_idx=-1 i
+  for ((i = 0; i < n; i++)); do
+    if [ "${BL_KIND[$i]}" = "V" ] && [ "${BL_ARROW[$i]}" = "cur" ]; then
+      cur_idx=$i
+      break
+    fi
+  done
+
   if [ "$rows" -eq 1 ]; then
-    HEADER_ONLY=1
-    return
-  fi
-  if [ "$rows" -eq 2 ]; then
-    OMIT_N=$n
+    [ "$cur_idx" -ge 0 ] && KEEP_IDX+=("$cur_idx")
     return
   fi
 
-  local total=$(( 1 + n ))
-  if [ "$total" -le "$rows" ]; then
-    local i
-    for ((i = 0; i < n; i++)); do KEEP_IDX+=("$i"); done
-    return
-  fi
-
-  local must_idx=() i
+  local k0=() k1=() k2=() k3=()
+  [ "$cur_idx" -ge 0 ] && k0+=("$cur_idx")
   for ((i = 0; i < n; i++)); do
-    case "${BL_KIND[$i]}" in
-      VE|CS) must_idx+=("$i") ;;
-    esac
-  done
-  local must_n=${#must_idx[@]}
-  local must_incl_header=$(( 1 + must_n ))
-
-  if [ $(( must_incl_header + 1 )) -gt "$rows" ]; then
-    local keep_n=$(( rows - 2 ))
-    [ "$keep_n" -lt 0 ] && keep_n=0
-    local k
-    for ((k = 0; k < keep_n && k < must_n; k++)); do
-      KEEP_IDX+=("${must_idx[$k]}")
-    done
-    OMIT_N=$(( n - ${#KEEP_IDX[@]} ))
-    return
-  fi
-
-  local room=$(( rows - must_incl_header - 1 ))
-  local cb_idx=() cx_idx=() vc_idx=()
-  for ((i = 0; i < n; i++)); do
-    case "${BL_KIND[$i]}" in
-      CB) cb_idx+=("$i") ;;
-      CX) cx_idx+=("$i") ;;
-      VC) vc_idx+=("$i") ;;
-    esac
+    [ "$i" -eq "$cur_idx" ] && continue
+    if [ "${BL_KIND[$i]}" = "C" ] && [ "${BL_PARENT[$i]}" = "$cur_idx" ] && [ "${BL_STATE[$i]}" = "/" ]; then
+      k1+=("$i")
+    elif [ "${BL_KIND[$i]}" = "C" ] && [ "${BL_PARENT[$i]}" = "$cur_idx" ] && [ "${BL_STATE[$i]}" = " " ]; then
+      k2+=("$i")
+    else
+      k3+=("$i")
+    fi
   done
 
-  local extra_idx=()
-  local take cnt
+  local budget=$(( rows - 1 ))
+  local take cnt selected=()
 
-  cnt=${#cb_idx[@]}
-  take=$room; [ "$take" -gt "$cnt" ] && take=$cnt
-  for ((i = 0; i < take; i++)); do extra_idx+=("${cb_idx[$i]}"); done
-  room=$(( room - take ))
+  cnt=${#k0[@]}; take=$budget; [ "$take" -gt "$cnt" ] && take=$cnt
+  for ((i = 0; i < take; i++)); do selected+=("${k0[$i]}"); done
+  budget=$(( budget - take ))
 
-  cnt=${#cx_idx[@]}
-  take=$room; [ "$take" -gt "$cnt" ] && take=$cnt
-  for ((i = 0; i < take; i++)); do extra_idx+=("${cx_idx[$i]}"); done
-  room=$(( room - take ))
+  cnt=${#k1[@]}; take=$budget; [ "$take" -gt "$cnt" ] && take=$cnt
+  for ((i = 0; i < take; i++)); do selected+=("${k1[$i]}"); done
+  budget=$(( budget - take ))
 
-  cnt=${#vc_idx[@]}
-  take=$room; [ "$take" -gt "$cnt" ] && take=$cnt
-  for ((i = 0; i < take; i++)); do extra_idx+=("${vc_idx[$i]}"); done
-  room=$(( room - take ))
+  cnt=${#k2[@]}; take=$budget; [ "$take" -gt "$cnt" ] && take=$cnt
+  for ((i = 0; i < take; i++)); do selected+=("${k2[$i]}"); done
+  budget=$(( budget - take ))
 
-  local all_idx=("${must_idx[@]}" "${extra_idx[@]}")
-  _sort_uint_asc "${all_idx[@]}"
+  cnt=${#k3[@]}; take=$budget; [ "$take" -gt "$cnt" ] && take=$cnt
+  for ((i = 0; i < take; i++)); do selected+=("${k3[$i]}"); done
+  budget=$(( budget - take ))
+
+  _sort_uint_asc "${selected[@]}"
   KEEP_IDX=("${SORTED_IDX[@]}")
   OMIT_N=$(( n - ${#KEEP_IDX[@]} ))
 }
@@ -347,52 +315,25 @@ render() {
 
   clamp_lines "$rows"
 
-  if [ "$HEADER_ONLY" -eq 1 ]; then
-    local hline
-    hline="$(render_header_line "$MODEL_SYM" "$MODEL_SLUG" "$MODEL_LEADWORD" "$MODEL_VERNAME" "$MODEL_FRAC" "$cols")"
-    OUT_LINES+=("$hline")
-    OUT_COLOR+=("$(color_for_sym "$MODEL_SYM")")
-    return
-  fi
-
-  local hline
-  hline="$(render_header_line "$MODEL_SYM" "$MODEL_SLUG" "$MODEL_LEADWORD" "$MODEL_VERNAME" "$MODEL_FRAC" "$cols")"
-  OUT_LINES+=("$hline")
-  OUT_COLOR+=("$(color_for_sym "$MODEL_SYM")")
-
-  local keep_n=${#KEEP_IDX[@]}
-  local last_child_pos=-1 p idx
+  local keep_n=${#KEEP_IDX[@]} p idx
   for ((p = 0; p < keep_n; p++)); do
     idx="${KEEP_IDX[$p]}"
     case "${BL_KIND[$idx]}" in
-      CX|CS|CB) last_child_pos=$p ;;
-    esac
-  done
-
-  local child_n="${#NR_NUM[@]}" digits
-  digits="${#child_n}"
-  [ "$digits" -lt 1 ] && digits=1
-
-  local nr_ptr=0
-  for ((p = 0; p < keep_n; p++)); do
-    idx="${KEEP_IDX[$p]}"
-    local kind="${BL_KIND[$idx]}" a="${BL_A[$idx]}" b="${BL_B[$idx]}" c="${BL_C[$idx]}"
-    case "$kind" in
-      VE|VC)
-        OUT_LINES+=("$(render_version_line "$a" "$b" "$c" "$cols")")
-        OUT_COLOR+=("$(color_for_sym "$a")")
+      V)
+        OUT_LINES+=("$(render_version_line "${BL_ARROW[$idx]}" "${BL_NUM[$idx]}" "${BL_NAME[$idx]}" "${BL_FRAC[$idx]}" "$DIGITS" "$cols")")
+        if [ "${BL_ARROW[$idx]}" = "cur" ]; then
+          OUT_COLOR+=("ACCENT")
+        else
+          OUT_COLOR+=("DEFAULT")
+        fi
         ;;
-      CX|CS|CB)
-        while [ "$nr_ptr" -lt "${#NR_BLIDX[@]}" ] && [ "${NR_BLIDX[$nr_ptr]}" -ne "$idx" ]; do
-          nr_ptr=$(( nr_ptr + 1 ))
-        done
-        local num_disp
-        num_disp="$(printf '%*d' "$digits" "${NR_NUM[$nr_ptr]}")"
-        nr_ptr=$(( nr_ptr + 1 ))
-        local arrow="├"
-        [ "$p" -eq "$last_child_pos" ] && arrow="└"
-        OUT_LINES+=("$(render_child_line "$arrow" "$num_disp" "$a" "$b" "$cols")")
-        OUT_COLOR+=("$(color_for_state "$a")")
+      C)
+        OUT_LINES+=("$(render_child_line "${BL_STATE[$idx]}" "${BL_BODY[$idx]}" "$DIGITS" "$cols")")
+        OUT_COLOR+=("$(color_for_state "${BL_STATE[$idx]}")")
+        ;;
+      D)
+        OUT_LINES+=("$(render_done_line "$DONE_N" "$cols")")
+        OUT_COLOR+=("DIM")
         ;;
     esac
   done
@@ -406,14 +347,6 @@ render() {
     OUT_LINES+=("$omit_line")
     OUT_COLOR+=("DEFAULT")
   fi
-}
-
-color_for_sym() {
-  case "$1" in
-    "✅") printf 'DIM' ;;
-    "▶") printf 'ACCENT' ;;
-    *) printf 'DEFAULT' ;;
-  esac
 }
 
 color_for_state() {
@@ -538,7 +471,8 @@ usage() {
   cmux-task-watch.sh [--once] [--plain]
 
 供給側から1フレーム分を受け取って描くだけの常駐です（Vault・宣言記録・
-cmux は読みません＝FR-62・FR-64）。呼び出し口は環境変数
+cmux は読みません＝FR-62・FR-64）。▶（今の版）・展開・番号はすべて
+供給側が決めます。呼び出し口は環境変数
 CMUX_DOCK_SUPPLY_TASK で上書きできます（既定は
 $HOME/work/takumi009-ai-env/cmux/cmux-task-model.sh）。供給側が無い・
 応答しない・契約の版が合わないときは "AI環境 未導入" のように理由行
