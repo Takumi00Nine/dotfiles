@@ -54,7 +54,7 @@ dotfiles/
 │   ├── test-zsh-aliases-source.sh
 │   └── test-cmux-dock-guard-launchagent.sh
 ├── tmux/
-│   └── tmux.conf                  prefix=Ctrl+a, directional splits, Shift+arrow movement, usage status bar, etc.
+│   └── tmux.conf                  prefix=Ctrl+a, directional splits, Shift+arrow movement, etc.
 ├── zsh/
 │   └── aliases.zsh                cc/cct functions, source'd from ~/.zshrc (not symlinked; see below)
 └── install.sh                     Installer: symlink each config, or append (zsh)
@@ -115,9 +115,6 @@ Hammerspoon configuration for controlling AI terminals with Keychron mouse butto
 ### tmux/
 - Changes prefix to `Ctrl+a` (while pressed, the session-name chip lights up red)
 - `prefix + arrow` creates directional splits, and `Shift + arrow` moves between panes
-- Always displays Claude / Codex usage in the status bar
-
-> Warning: The status bar references `tmux-usage.sh` from the old, now-retired `claude-codex-usage` repository via a hardcoded absolute path in `status-right`. `tmux/tmux.conf` has not been updated for this retirement yet (out of scope for the Dock-usage-pane migration); the bar will not appear until that path is fixed or the segment is removed. Not currently used (no active tmux usage), so this has been left as-is.
 
 ### ghostty/
 - Catppuccin Mocha theme and `macos-option-as-alt` (Option shortcuts for Claude Code)
@@ -207,7 +204,7 @@ dotfiles/
 │   ├── test-zsh-aliases-source.sh
 │   └── test-cmux-dock-guard-launchagent.sh
 ├── tmux/
-│   └── tmux.conf                  prefix=Ctrl+a, 方向分割, Shift+矢印移動, 使用率ステータスバー 等
+│   └── tmux.conf                  prefix=Ctrl+a, 方向分割, Shift+矢印移動 等
 ├── zsh/
 │   └── aliases.zsh                cc/cct関数。~/.zshrcからsourceされる（symlinkではない。後述）
 └── install.sh                     インストーラ: 設定ごとにsymlink、またはappend（zsh）
@@ -268,9 +265,6 @@ Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。
 ### tmux/
 - prefix を `Ctrl+a` に変更（押下中はセッション名チップが赤く点灯）
 - `prefix + 矢印` で方向分割、`Shift + 矢印` でペイン移動
-- Claude / Codex の使用率をステータスバーに常時表示
-
-> ⚠️ ステータスバーは旧・退役済みリポジトリ `claude-codex-usage` の `tmux-usage.sh` を、`tmux/tmux.conf` にハードコードされた絶対パスで参照する（`status-right`）。この退役に伴う`tmux/tmux.conf`側の整理は今回の対応範囲外（Dock Usageペイン移設のスコープ外）でまだ未着手。tmuxは現状使用していないため、パスが無いままバーが出ない状態を放置している。
 
 ### ghostty/
 - テーマ Catppuccin Mocha、`macos-option-as-alt`（Claude Code の Option ショートカット）
