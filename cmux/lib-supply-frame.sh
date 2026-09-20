@@ -19,11 +19,14 @@
 #   fi
 
 # 契約の版は種別ごとに独立させる（設計 v4 §39.3 D-v4-1）。Task は行文法を
-# 非互換で上げ（H/X廃止・V/C/D新設）cmux-dock-frame/2、Project は不変で
-# cmux-dock-frame/1 のまま。validate_frame が種別からこの2定数を引き、
-# awkへ -v expect_ver=… として渡す（L290付近の旧リテラル比較を置換）。
+# 非互換で上げ（H/X廃止・V/C/D新設）cmux-dock-frame/2。Project は
+# health-self-explain 設計 v1.2 §6（D-3）で cmux-dock-frame/3 へ非互換に
+# 上げた＝B行の種別を「外部脳」1種に統一し、warn値へ`error`を追加、B行を
+# 高々1行に変更（旧`棚卸し`/`週次`2種・`warn|ok`2値・最大2行は廃止）。
+# validate_frame が種別からこの2定数を引き、awkへ -v expect_ver=… として
+# 渡す（L290付近の旧リテラル比較を置換）。
 CMUX_FRAME_VERSION_TASK="cmux-dock-frame/2"
-CMUX_FRAME_VERSION_PROJECT="cmux-dock-frame/1"
+CMUX_FRAME_VERSION_PROJECT="cmux-dock-frame/3"
 
 # is_number の複製（複製元: cmux/lib-dock-view.sh の is_number）。この
 # ファイルは「LIB_DIR/lib-dock-view.sh を先に source 済み」という暗黙の
@@ -410,8 +413,10 @@ END {
       if (raw_nf[pos] != 4) exit 3
       bkind[bn] = fld[pos,2]; bwarn[bn] = fld[pos,3]; btext[bn] = fld[pos,4]
       if (bkind[bn] == "" || bwarn[bn] == "" || btext[bn] == "") exit 3
-      if (bkind[bn] != "棚卸し" && bkind[bn] != "週次") exit 3
-      if (bwarn[bn] != "warn" && bwarn[bn] != "ok") exit 3
+      # cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）＝B行の
+      # 種別は「外部脳」1種のみ、warn値は ok/warn/error の3値、B行は高々1行。
+      if (bkind[bn] != "外部脳") exit 3
+      if (bwarn[bn] != "warn" && bwarn[bn] != "ok" && bwarn[bn] != "error") exit 3
       pos++
     }
     if (pos != eidx) exit 3
@@ -421,12 +426,7 @@ END {
       if (pcat[k] == "保留") seen_hold = 1
       else if (seen_hold) exit 3
     }
-    cnt_tana = 0; cnt_week = 0
-    for (k = 1; k <= bn; k++) {
-      if (bkind[k] == "棚卸し") cnt_tana++
-      else cnt_week++
-    }
-    if (cnt_tana > 1 || cnt_week > 1) exit 3
+    if (bn > 1) exit 3
   }
 
   for (i = 2; i < eidx; i++) {

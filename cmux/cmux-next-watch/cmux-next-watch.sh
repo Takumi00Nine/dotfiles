@@ -6,7 +6,8 @@
 # 縮退する（FR-68）。呼び出し口は環境変数 CMUX_DOCK_SUPPLY_PROJECT で上書き
 # できる（既定はリポジトリ内の絶対パス）。
 #
-# 表示例:
+# 表示例（外部脳ヘルス行はDock契約 cmux-dock-frame/3＝health-self-explain
+# 設計 v1.2 §6・D-3。1行3値＋末尾付記のみ・見出し行は出さない）:
 #   ▶ 稼働中 (2)
 #   5 svwb-pilot 実データ照合を回す
 #   6 takumi009- (next未設定)
@@ -14,9 +15,7 @@
 #   ⏸ 保留 (1)
 #   7 avatar-swi 配布方式のたたき台を書く
 #
-#   ⚠ 外部脳
-#   棚卸し 要確認15件 (8/5)
-#   週次 ✅8/5
+#   外部脳 OK 候補390件
 #
 # 引数: （なし）＝常駐 / --once＝1フレーム出して終了。--list は供給側
 # （cmux-next-model.sh --list）へ移設済みで、この常駐は提供しない
@@ -53,8 +52,11 @@ LBL="${ESC}[38;5;252m"
 LBL_BOLD="${ESC}[38;5;252;1m"
 GOOD_C="${ESC}[38;5;114m"
 WARN_C="${ESC}[38;5;214m"
-WARN_BOLD="${ESC}[38;5;214;1m"
-GOOD_BOLD="${ESC}[38;5;114;1m"
+# 外部脳ヘルスのERROR用に赤1色を追加（本人裁定OQ-1・2026-09-20・
+# health-self-explain 設計 v1.2 §6）。WARN_BOLD/GOOD_BOLDは外部脳ブロック
+# の見出し行専用だったが、見出し行を出さない契約（cmux-dock-frame/3）に
+# なったため不要＝退役。
+ERR_C="${ESC}[38;5;203m"
 
 cols_now() { term_cols ""; }
 
@@ -150,30 +152,26 @@ render_next() {
   fi
 }
 
-# 外部脳ブロック（B_*が0行ならブロックごと出さない＝FR-68・AC-97②）。
+# 外部脳ヘルス行（B_*が0行ならブロックごと出さない＝FR-68・AC-97②）。
+# Dock契約 cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）＝
+# 見出し行は出さず、B行を1行だけ `<色><kind> <text>` で描く（B行は
+# lib-supply-frame.sh の validate_frame が既に高々1行に絞っている）。
 render_extbrain() {
   local n=${#B_KIND[@]}
   [ "$n" -eq 0 ] && return
 
-  local has_warn=0 i
-  for ((i = 0; i < n; i++)); do
-    [ "${B_WARN[$i]}" = "warn" ] && has_warn=1
-  done
-
-  if [ "$has_warn" -eq 1 ]; then
-    printf '%s⚠ 外部脳%s\n' "$WARN_BOLD" "$RESET"
-  else
-    printf '%s✅ 外部脳%s\n' "$GOOD_BOLD" "$RESET"
-  fi
-
-  for ((i = 0; i < n; i++)); do
-    local kind="${B_KIND[$i]}" warn="${B_WARN[$i]}" text="${B_TEXT[$i]}"
-    if [ "$warn" = "warn" ]; then
-      printf '%s%s %s%s\n' "$WARN_C" "$kind" "$text" "$RESET"
-    else
-      printf '%s%s %s%s\n' "$GOOD_C" "$kind" "$text" "$RESET"
-    fi
-  done
+  local kind="${B_KIND[0]}" warn="${B_WARN[0]}" text="${B_TEXT[0]}"
+  local color
+  case "$warn" in
+    error) color="$ERR_C" ;;
+    warn)  color="$WARN_C" ;;
+    ok)    color="$GOOD_C" ;;
+    # 契約外の値は到達しない前提（validate_frameがok/warn/error以外を
+    # rc=3で落とす＝lib-supply-frame.sh）。それでも黙ってOKの緑に化けない
+    # よう、未知値は無色（dim）で描く（検証1巡目C-3）。
+    *)     color="$LBL" ;;
+  esac
+  printf '%s%s %s%s\n' "$color" "$kind" "$text" "$RESET"
 }
 
 render() {
@@ -194,11 +192,7 @@ compose_frame() {
   local n=${#P_NUM[@]}
   local ext_out n_ext n_b=${#B_KIND[@]}
   ext_out="$(render_extbrain)"
-  if [ "$n_b" -gt 0 ]; then
-    n_ext=$(( n_b + 1 ))   # 見出し1行＋B行数（wcを使わず配列件数から直接出す＝検証1巡目 #10）
-  else
-    n_ext=0
-  fi
+  n_ext=$n_b   # 見出し行が無い契約（/3）なのでB行数がそのまま外部脳ブロックの行数
 
   local rows avail
   rows=$(term_rows "$ROWS_OVERRIDE")

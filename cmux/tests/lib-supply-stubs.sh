@@ -51,20 +51,23 @@ _p28_list() {
 }
 
 # Project枠の正準本体行を配列 _P6_PROJ_LINES へ設定する。番号は $1 $2 $3
-# （既定 5 6 7）で差し替えられる（AC-92の検査に使う）。
+# （既定 5 6 7）で差し替えられる（AC-92の検査に使う）。B行は
+# cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）の契約どおり
+# 種別「外部脳」1行のみ。$4=Bの種別（既定外部脳） $5=Bの警告値（既定ok・
+# 空文字にするとB行を出さない＝ヘルス行0行） $6=Bの本文（既定OK）。
 _p6_proj_lines() {
   local n1="${1:-5}" n2="${2:-6}" n3="${3:-7}"
+  local bkind="${4:-外部脳}" bwarn="${5-ok}" btext="${6:-OK}"
   _P6_PROJ_LINES=(
     "P${TAB}${n1}${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}稼働中"
     "P${TAB}${n2}${TAB}takumi009-ai-env${TAB}${TAB}稼働中"
     "P${TAB}${n3}${TAB}avatar-switch-plan${TAB}配布方式のたたき台を書く${TAB}保留"
-    "B${TAB}棚卸し${TAB}warn${TAB}要確認15件 (8/5)"
-    "B${TAB}週次${TAB}ok${TAB}✅8/5"
   )
+  [ -n "$bwarn" ] && _P6_PROJ_LINES+=("B${TAB}${bkind}${TAB}${bwarn}${TAB}${btext}")
 }
 
 # 行配列（#V/Eを除く本体行）から完全なフレーム文字列（#V・E込み）を組み立て
-# stdout へ出す。$1=種別(Task/Project) $2=版名（既定cmux-dock-frame/1）
+# stdout へ出す。$1=種別(Task/Project) $2=版名（必須）
 # 残りは行配列（配列名を渡さず値渡しにするため "$@" の3つ目以降を使う）。
 _compose_frame() {
   local kind="$1" version="$2"
@@ -203,9 +206,15 @@ mk_stub_P6_task() {  # $1=パス [n1] [n2]（版番号の上書き・既定1 2�
   _compose_frame "Task" "cmux-dock-frame/2" "${_P6_TASK_LINES[@]}" |
     _write_frame_stub_with_list "$1" "$(_p6_task_list "$n1" "$n2")"
 }
-mk_stub_P6_project() {  # $1=パス [n1 n2 n3]
-  _p6_proj_lines "$2" "$3" "$4"
-  _compose_frame "Project" "cmux-dock-frame/1" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$1"
+mk_stub_P6_project() {  # $1=パス [n1 n2 n3] [bkind bwarn btext]（版は
+                         # $CMUX_FRAME_VERSION_PROJECT・引数はshiftして
+                         # そのまま_p6_proj_linesへ渡す＝渡さなかった引数を
+                         # 空文字へ変換しない。$5(bwarn)の「未指定なら既定
+                         # ok・空文字を渡せばB行なし」の区別を保つため）
+  local path="$1"
+  shift
+  _p6_proj_lines "$@"
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"
 }
 
 # --- P-15: rc=0・0バイト -----------------------------------------------------
@@ -299,7 +308,7 @@ mk_stub_P21() {  # $1=パス $2=種別 $3=秒(既定2)
   local kind="${2:-Task}" secs="${3:-2}"
   if [ "$kind" = "Project" ]; then
     _p6_proj_lines
-    { echo "sleep $secs"; _compose_frame "Project" "cmux-dock-frame/1" "${_P6_PROJ_LINES[@]}"; } > "${1}.gen"
+    { echo "sleep $secs"; _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}"; } > "${1}.gen"
   else
     _p6_task_lines
     { echo "sleep $secs"; _compose_frame "Task" "cmux-dock-frame/2" "${_P6_TASK_LINES[@]}"; } > "${1}.gen"
@@ -444,7 +453,7 @@ mk_stub_P26a() {  # $1=パス $2=足跡ファイル $3=種別
   local frame
   if [ "$kind" = "Project" ]; then
     _p6_proj_lines
-    frame="$(_compose_frame "Project" "cmux-dock-frame/1" "${_P6_PROJ_LINES[@]}")"
+    frame="$(_compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}")"
   else
     _p6_task_lines
     frame="$(_compose_frame "Task" "cmux-dock-frame/2" "${_P6_TASK_LINES[@]}")"
@@ -548,11 +557,11 @@ mk_stub_P_violation() {
     P-12b) # 区分が完了（Project）
       _p6_proj_lines
       _P6_PROJ_LINES[0]="P${TAB}5${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}完了"
-      _compose_frame "Project" "cmux-dock-frame/1" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
-    P-12c) # ヘルスの種別が未定義値（Project）
+      _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
+    P-12c) # ヘルスの種別が未定義値（Project・種別は「外部脳」以外は不可）
       _p6_proj_lines
       _P6_PROJ_LINES[3]="B${TAB}未定義${TAB}warn${TAB}x"
-      _compose_frame "Project" "cmux-dock-frame/1" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
+      _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
     P-12d) # 展開欄がopen/fold以外
       _mutate_task 0 "V${TAB}1${TAB}v2${TAB}1/3${TAB}cur${TAB}exp"
       _compose_frame "$kind" "$version" "${_MUT[@]}" | _write_frame_stub "$path"; return ;;
@@ -696,14 +705,16 @@ mk_stub_P_violation() {
       { local l=("${body[@]}" "C${TAB}[ ]${TAB}extra")
         _compose_frame "$kind" "$version" "${l[@]}"
       } | _write_frame_stub "$path"; return ;;
-    P-19a) # ヘルス行の種別が重複（Project）
+    P-19a) # ヘルス行が2行（Project・上限違反＝cmux-dock-frame/3ではB行は
+           # 種別「外部脳」1種のみのためP-12cと同型の重複ではなく行数超過
+           # として現れる＝検証1巡目#C-1修正案）
       _p6_proj_lines
-      _P6_PROJ_LINES+=("B${TAB}棚卸し${TAB}ok${TAB}dup")
-      _compose_frame "Project" "cmux-dock-frame/1" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
+      _P6_PROJ_LINES+=("B${TAB}外部脳${TAB}ok${TAB}dup")
+      _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
     P-19b) # 区分の並びが混ざる（Project・保留の後に稼働中が来る）
       _p6_proj_lines
       _P6_PROJ_LINES[0]="P${TAB}5${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}保留"
-      _compose_frame "Project" "cmux-dock-frame/1" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
+      _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
     *)
       echo "mk_stub_P_violation: 未知のサブID: $id" >&2
       return 1

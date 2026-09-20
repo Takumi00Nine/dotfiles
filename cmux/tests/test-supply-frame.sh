@@ -87,16 +87,20 @@ validate_frame Task "$WORKDIR/p6task.raw" "$WORKDIR/p6task.model"
 assert_eq "AC-134④: P-6′ Task は通常(rc=0)" "0" "$?"
 assert_eq "P-6′ Task の本体行数は6" "6" "$(wc -l < "$WORKDIR/p6task.model" | tr -d ' ')"
 
-mk_stub_P6_project "$WORKDIR/p6proj" 5 6 7
+# cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）のProject正準
+# フレーム。共有fixture（lib-supply-stubs.sh の mk_stub_P6_project／
+# _p6_proj_lines）を検証1巡目C-1で新契約(/3・B行=外部脳1種)へ更新した
+# ため、以前のようにこのファイル内へ直書きせず共有stubを呼ぶ。
+mk_stub_P6_project "$WORKDIR/p6proj"
 "$WORKDIR/p6proj" --frame > "$WORKDIR/p6proj.raw"
 validate_frame Project "$WORKDIR/p6proj.raw" "$WORKDIR/p6proj.model"
-assert_eq "P-6 Project は通常(rc=0)" "0" "$?"
+assert_eq "project_v3_accepted: /3のProject正準フレームは通常(rc=0)" "0" "$?"
 
 # 空のProjectフレーム（P*・B*とも0行）はFR-82#5どおり正当（検証1巡目#8の
 # 回帰・検証2巡目#25①）。差し戻すと body_n==0 を一律拒否してしまい、
 # Vault/外部脳ともに空のときの「稼働中(0)/保留(0)」描画ができなくなる。
 {
-  printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf '#V\tcmux-dock-frame/3\tProject\n'
   printf 'E\t0\n'
 } > "$WORKDIR/p6proj_empty.raw"
 validate_frame Project "$WORKDIR/p6proj_empty.raw" "$WORKDIR/p6proj_empty.model"
@@ -111,6 +115,79 @@ assert_eq "空のProjectフレームの本体行数は0" "0" "$(wc -l < "$WORKDI
 } > "$WORKDIR/ac134c.raw"
 validate_frame Project "$WORKDIR/ac134c.raw" "$WORKDIR/ac134c.model"
 assert_eq "AC-134③: Project要求で#Vが/2は版ちがい(rc=2)" "2" "$?"
+
+# project_v1_is_version_mismatch_rc2: 旧Project契約(cmux-dock-frame/1)は
+# 非互換の版上げ（health-self-explain 設計v1.2 §6・D-3）後は版ちがい
+# (rc=2)。契約が本当に/3へ上がっていることの陽性検査。
+{
+  printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/proj_v1.raw"
+validate_frame Project "$WORKDIR/proj_v1.raw" "$WORKDIR/proj_v1.model"
+assert_eq "project_v1_is_version_mismatch_rc2: 旧/1は版ちがい(rc=2)" "2" "$?"
+
+echo "=== Project B行契約 cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3） ==="
+
+# project_b_row_zero_is_valid: P行があってもB行0行は正当(rc=0・判定機が
+# 動かないとき等の縮退＝FR-15の例外)。
+{
+  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/proj_b0.raw"
+validate_frame Project "$WORKDIR/proj_b0.raw" "$WORKDIR/proj_b0.model"
+assert_eq "project_b_row_zero_is_valid: P行ありB行0行は通常(rc=0)" "0" "$?"
+
+# project_b_error_value_accepted: warn=errorは正当(rc=0・本人裁定OQ-1)。
+{
+  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf 'B\t外部脳\terror\tERROR\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/proj_b_error.raw"
+validate_frame Project "$WORKDIR/proj_b_error.raw" "$WORKDIR/proj_b_error.model"
+assert_eq "project_b_error_value_accepted: warn=errorは通常(rc=0)" "0" "$?"
+
+# project_b_rows_two_rc3: B行が2行は契約違反(rc=3・種別を問わずB行は
+# 高々1行＝設計v1.2 §6のcnt_tana/cnt_week検査の置換)。
+{
+  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf 'B\t外部脳\tok\tOK\n'
+  printf 'B\t外部脳\tok\tOK\n'
+  printf 'E\t2\n'
+} > "$WORKDIR/proj_b2.raw"
+validate_frame Project "$WORKDIR/proj_b2.raw" "$WORKDIR/proj_b2.model"
+assert_eq "project_b_rows_two_rc3: B行2行は応答なし(rc=3)" "3" "$?"
+
+# project_b_unknown_kind_rc3: 種別が「外部脳」以外は契約違反(rc=3・旧
+# 「棚卸し」「週次」も含め廃止)。
+{
+  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf 'B\t未定義\tok\tOK\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/proj_b_kind.raw"
+validate_frame Project "$WORKDIR/proj_b_kind.raw" "$WORKDIR/proj_b_kind.model"
+assert_eq "project_b_unknown_kind_rc3: 種別が外部脳以外は応答なし(rc=3)" "3" "$?"
+
+# project_b_unknown_warn_rc3: warn値がok/warn/error以外は契約違反(rc=3)。
+{
+  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf 'B\t外部脳\tcritical\tX\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/proj_b_warn.raw"
+validate_frame Project "$WORKDIR/proj_b_warn.raw" "$WORKDIR/proj_b_warn.model"
+assert_eq "project_b_unknown_warn_rc3: warn値が3値以外は応答なし(rc=3)" "3" "$?"
+
+# project_p_rows_unchanged: P行の文法（区分の並び＝保留の後に稼働中は
+# 不可）は/3でも不変。
+{
+  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t保留\n'
+  printf 'P\t6\ttakumi009-ai-env\t\t稼働中\n'
+  printf 'E\t2\n'
+} > "$WORKDIR/proj_p_order.raw"
+validate_frame Project "$WORKDIR/proj_p_order.raw" "$WORKDIR/proj_p_order.model"
+assert_eq "project_p_rows_unchanged: 保留の後に稼働中は応答なし(rc=3・P行規則は不変)" "3" "$?"
 
 mk_stub_P23 "$WORKDIR/p23"
 "$WORKDIR/p23" --frame > "$WORKDIR/p23.raw"
@@ -141,7 +218,7 @@ echo "=== validate_frame（DT-12・正当な空欄を含むフレーム） ==="
 # （述語は変わらない＝§39.7.2）。
 
 {
-  printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf '#V\tcmux-dock-frame/3\tProject\n'
   printf 'P\t1\tproj-a\t\t稼働中\n'   # next値が空
   printf 'E\t1\n'
 } > "$WORKDIR/dt12_p.raw"
@@ -168,6 +245,12 @@ mk_stub_P31 "$WORKDIR/p31"
 "$WORKDIR/p31" --frame > "$WORKDIR/p31.raw"
 validate_frame Task "$WORKDIR/p31.raw" "$WORKDIR/p31.model"
 assert_eq "P-31(Task種別でcmux-dock-frame/1・v3形)はAI環境 版ちがい相当(rc=2)" "2" "$?"
+
+# Project専用の4サブID（P-12b・P-12c・P-19a・P-19b）は検証1巡目C-1で
+# 共有fixture（cmux/tests/lib-supply-stubs.sh の mk_stub_P_violation）側を
+# 新契約（/3・B行=外部脳1種）へ更新したため、他のIDと同じ汎用経路で
+# そのまま生成できる（以前このファイル内に持っていた重複実装
+# _mk_project_violation_v3 は削除）。
 
 VIOLATION_FAIL=0
 IMPLEMENTED_IDS=()

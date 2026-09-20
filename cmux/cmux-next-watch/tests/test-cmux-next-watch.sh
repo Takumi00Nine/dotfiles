@@ -53,6 +53,14 @@ run_watch() {  # $1=supply-path 残り=引数
 
 now_mono() { python3 -c 'import time; print(time.monotonic())'; }
 
+# --- Project v3 フレーム生成（health-self-explain 設計 v1.2 §6・D-3） ------
+# 検証1巡目C-1で共有fixture（cmux/tests/lib-supply-stubs.sh の
+# mk_stub_P6_project／_p6_proj_lines）を新契約（cmux-dock-frame/3・B行=
+# 外部脳1種・bkind/bwarn/btextの上書き対応）へ更新したため、このファイル
+# 内に同じ組み立てを重複実装せず共有stubをそのまま呼ぶ。P行の既定値は
+# _p6_proj_linesの既定と同一（既存の期待値EXPECT_P6等をそのまま流用
+# できる）。
+
 # $1=PID を上限秒(既定10秒)までポーリングで待ち、それでも生きていたら-9で
 # 強制終了する（テスト側の安全弁・検証1巡目 #14）。
 wait_pid_bounded() {
@@ -66,27 +74,67 @@ wait_pid_bounded() {
   return 1
 }
 
-# v3.5の Project 期待フレーム（10行・空行2行を含む）。
-EXPECT_P6="$(printf '▶ 稼働中 (2)\n5 svwb-pilot 実データ照合を回す\n6 takumi009- (next未設定)\n\n⏸ 保留 (1)\n7 avatar-swi 配布方式のたたき台を書く\n\n⚠ 外部脳\n棚卸し 要確認15件 (8/5)\n週次 ✅8/5')"
+# Project期待フレーム（8行・空行2行を含む。外部脳ヘルス行はDock契約
+# cmux-dock-frame/3＝health-self-explain 設計 v1.2 §6・D-3＝見出し行なし
+# の1行）。
+EXPECT_P6="$(printf '▶ 稼働中 (2)\n5 svwb-pilot 実データ照合を回す\n6 takumi009- (next未設定)\n\n⏸ 保留 (1)\n7 avatar-swi 配布方式のたたき台を書く\n\n外部脳 OK')"
 
-echo "=== AC-91: Project期待フレーム10行との完全一致（色なし比較） ==="
+echo "=== AC-91: Project期待フレーム8行との完全一致（色なし比較） ==="
 mk_stub_P6_project "$WORKDIR/p6" 5 6 7
 OUT="$(CMUX_NEXT_ROWS=40 run_watch "$WORKDIR/p6" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
-assert_eq "AC-91: --once の出力(色除去後)がv3.5の期待フレームと完全一致" "$EXPECT_P6" "$OUT"
-assert_eq "AC-91: 行数は10" "10" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+assert_eq "AC-91: --once の出力(色除去後)が期待フレームと完全一致" "$EXPECT_P6" "$OUT"
+assert_eq "AC-91: 行数は8(見出し行が無くなった分だけ旧v3.5の10行より減る)" "8" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
 
-echo "=== AC-97: 外部脳ブロック ==="
-assert_true "AC-97①: ⚠はU+26A0単独（U+FE0Fを伴わない）" \
-  "$(printf '%s\n' "$OUT" | grep -F '⚠ 外部脳' | python3 -c "
-import sys
-line = sys.stdin.readline()
-print(1 if '⚠' in line and '️' not in line else 0)
-")"
+echo "=== 外部脳ヘルス行（cmux-dock-frame/3・health-self-explain 設計 v1.2 §6） ==="
+assert_true "extbrain_no_heading_one_line: ⚠/✅の見出し行が0件" \
+  "$(printf '%s\n' "$OUT" | grep -qE '⚠ 外部脳|✅ 外部脳' && echo 0 || echo 1)"
+assert_true "extbrain_no_heading_one_line: 外部脳ブロックはちょうど1行" \
+  "$([ "$(printf '%s\n' "$OUT" | grep -cF '外部脳')" -eq 1 ] && echo 1 || echo 0)"
 
-mk_stub_P6_project "$WORKDIR/p6_nohealth" 5 6 7
-# ヘルス行0行のフレームを直接組み立てる（B行を含まない）。
+# extbrain_three_colors_error_red: warn値ごとに正しい色が乗る（本人裁定
+# OQ-1のERR_C=38;5;203を含む3色）。色を消さない生出力で見る。
+for spec in "ok:114" "warn:214" "error:203"; do
+  bwarn="${spec%%:*}" expect_code="${spec#*:}"
+  mk_stub_P6_project "$WORKDIR/color_$bwarn" 5 6 7 外部脳 "$bwarn" "TXT"
+  COLOR_RAW="$(run_watch "$WORKDIR/color_$bwarn" --once)"
+  assert_true "extbrain_three_colors_error_red(${bwarn}): 38;5;${expect_code}が外部脳行に乗る" \
+    "$(printf '%s' "$COLOR_RAW" | grep -qF "$(printf '\033')[38;5;${expect_code}m外部脳 TXT" && echo 1 || echo 0)"
+done
+
+# extbrain_suffix_candidates_rendered: 末尾の「候補N件」付記（供給側が
+# 付ける・0件も表示＝R-2）をそのまま逐語で描く。
+mk_stub_P6_project "$WORKDIR/suffix" 5 6 7 外部脳 ok "OK 候補390件"
+OUT_SUFFIX="$(run_watch "$WORKDIR/suffix" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+assert_true "extbrain_suffix_candidates_rendered: 「外部脳 OK 候補390件」が逐語で出る" \
+  "$(printf '%s\n' "$OUT_SUFFIX" | grep -qxF '外部脳 OK 候補390件' && echo 1 || echo 0)"
+
+# compose_frame_n_ext_equals_n_b: 旧実装(n_ext=n_b+1・見出し1行分を過剰
+# 計上)ならCMUX_NEXT_ROWS=9でクランプが要ると誤判定し「…他」行が出る。
+# 新実装(n_ext=n_b)は8行ちょうどに収まりクランプ不要（設計v1.2 §6）。
+OUT_BOUND="$(CMUX_NEXT_ROWS=9 run_watch "$WORKDIR/p6" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+assert_eq "compose_frame_n_ext_equals_n_b: ROWS=9境界でも期待フレームと完全一致(クランプなし)" "$EXPECT_P6" "$OUT_BOUND"
+assert_true "compose_frame_n_ext_equals_n_b: 「…他」行が出ない" \
+  "$(printf '%s\n' "$OUT_BOUND" | grep -qF '…他' && echo 0 || echo 1)"
+
+# version_mismatch_line_unchanged: 旧Project契約(cmux-dock-frame/1)を
+# 名乗るフレームはAC-97③等と同じ縮退文言「AI環境 版ちがい」（値そのもの
+# は/3への非互換版上げで変わったが、縮退時の固定文言は不変）。
 {
   printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'E\t1\n'
+} > "$WORKDIR/oldver.data"
+cat > "$WORKDIR/oldver" <<'EOF'
+#!/bin/bash
+cat "$0.data"
+EOF
+chmod +x "$WORKDIR/oldver"
+OUT_OLDVER="$(run_watch "$WORKDIR/oldver" --once)"
+assert_eq "version_mismatch_line_unchanged: 旧/1はAI環境 版ちがい" "AI環境 版ちがい" "$OUT_OLDVER"
+
+# ヘルス行0行のフレームを直接組み立てる（B行を含まない）。
+{
+  printf '#V\tcmux-dock-frame/3\tProject\n'
   printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
   printf 'E\t1\n'
 } > "$WORKDIR/p6_nohealth.data"
@@ -160,7 +208,7 @@ cat > "$WORKDIR/spy_supply" <<SPYEOF
 #!/bin/bash
 echo call >> "$SPY_LOG"
 TAB="\$(printf '\t')"
-printf '#V%scmux-dock-frame/1%sProject\n' "\$TAB" "\$TAB"
+printf '#V%scmux-dock-frame/3%sProject\n' "\$TAB" "\$TAB"
 printf 'P%s1%sspy%s%s稼働中\n' "\$TAB" "\$TAB" "\$TAB" "\$TAB"
 printf 'E%s1\n' "\$TAB"
 SPYEOF
@@ -196,7 +244,7 @@ assert_true "AC-88: 5回目までの経過が4×interval(=4秒)以上(検証2巡
 echo "=== AC-90: FR-72の描画射影（切り詰め・クランプ・件数一致） ==="
 # 10コードポイント超の正式名と幅に収まらないnext値・クランプなし(M-4=幅16)。
 {
-  printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf '#V\tcmux-dock-frame/3\tProject\n'
   printf 'P\t1\tavatar-switch-plan-long-name\t配布方式のたたき台を書く長い説明文\t稼働中\n'
   printf 'E\t1\n'
 } > "$WORKDIR/p90a.data"
@@ -212,7 +260,7 @@ assert_true "AC-90③: 正式名は10コードポイントへ切り詰められ�
 
 # クランプあり（高さ8）＝各区分の見出しの件数が全行数と一致(落ちた分だけ減らない)
 {
-  printf '#V\tcmux-dock-frame/1\tProject\n'
+  printf '#V\tcmux-dock-frame/3\tProject\n'
   for i in 1 2 3 4 5; do
     printf 'P\t%d\tproj-%d\tnext-%d\t稼働中\n' "$i" "$i" "$i"
   done
