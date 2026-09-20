@@ -53,17 +53,18 @@ _p28_list() {
 }
 
 # Project枠の正準本体行を配列 _P6_PROJ_LINES へ設定する。番号は $1 $2 $3
-# （既定 5 6 7）で差し替えられる（AC-92の検査に使う）。B行は
-# cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）の契約どおり
+# （既定 5 6 7）で差し替えられる（AC-92の検査に使う）。P行は
+# cmux-dock-frame/4（v5 §40.4）の6欄＝第6欄が待ち日時（待ち以外は空）。B行は
+# health-self-explain 設計 v1.2 §6・D-3 の契約どおり
 # 種別「外部脳」1行のみ。$4=Bの種別（既定外部脳） $5=Bの警告値（既定ok・
 # 空文字にするとB行を出さない＝ヘルス行0行） $6=Bの本文（既定OK）。
 _p6_proj_lines() {
   local n1="${1:-5}" n2="${2:-6}" n3="${3:-7}"
   local bkind="${4:-外部脳}" bwarn="${5-ok}" btext="${6:-OK}"
   _P6_PROJ_LINES=(
-    "P${TAB}${n1}${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}稼働中"
-    "P${TAB}${n2}${TAB}takumi009-ai-env${TAB}${TAB}稼働中"
-    "P${TAB}${n3}${TAB}avatar-switch-plan${TAB}配布方式のたたき台を書く${TAB}保留"
+    "P${TAB}${n1}${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}稼働中${TAB}"
+    "P${TAB}${n2}${TAB}takumi009-ai-env${TAB}${TAB}稼働中${TAB}"
+    "P${TAB}${n3}${TAB}avatar-switch-plan${TAB}配布方式のたたき台を書く${TAB}保留${TAB}"
   )
   [ -n "$bwarn" ] && _P6_PROJ_LINES+=("B${TAB}${bkind}${TAB}${bwarn}${TAB}${btext}")
 }
@@ -558,7 +559,7 @@ mk_stub_P_violation() {
       _compose_frame "$kind" "$version" "${_MUT[@]}" | _write_frame_stub "$path"; return ;;
     P-12b) # 区分が完了（Project）
       _p6_proj_lines
-      _P6_PROJ_LINES[0]="P${TAB}5${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}完了"
+      _P6_PROJ_LINES[0]="P${TAB}5${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}完了${TAB}"
       _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
     P-12c) # ヘルスの種別が未定義値（Project・種別は「外部脳」以外は不可）
       _p6_proj_lines
@@ -707,7 +708,7 @@ mk_stub_P_violation() {
       { local l=("${body[@]}" "C${TAB}[ ]${TAB}extra")
         _compose_frame "$kind" "$version" "${l[@]}"
       } | _write_frame_stub "$path"; return ;;
-    P-19a) # ヘルス行が2行（Project・上限違反＝cmux-dock-frame/3ではB行は
+    P-19a) # ヘルス行が2行（Project・上限違反＝v1.2 §6以降の契約ではB行は
            # 種別「外部脳」1種のみのためP-12cと同型の重複ではなく行数超過
            # として現れる＝検証1巡目#C-1修正案）
       _p6_proj_lines
@@ -715,7 +716,7 @@ mk_stub_P_violation() {
       _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
     P-19b) # 区分の並びが混ざる（Project・保留の後に稼働中が来る）
       _p6_proj_lines
-      _P6_PROJ_LINES[0]="P${TAB}5${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}保留"
+      _P6_PROJ_LINES[0]="P${TAB}5${TAB}svwb-pilot-log${TAB}実データ照合を回す${TAB}保留${TAB}"
       _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_P6_PROJ_LINES[@]}" | _write_frame_stub "$path"; return ;;
     *)
       echo "mk_stub_P_violation: 未知のサブID: $id" >&2
@@ -723,6 +724,118 @@ mk_stub_P_violation() {
       ;;
   esac
 }
+
+# --- WU-F 系・WU-Z（v5・要件 requirements-v5.md §7・設計 §40.9.2） -----------
+
+# P行1行を組む（6欄・cmux-dock-frame/4）。$1=番号 $2=名前 $3=next $4=区分 $5=待ち日時
+_p_row() { printf 'P%s%s%s%s%s%s%s%s%s%s' "$TAB" "$1" "$TAB" "$2" "$TAB" "$3" "$TAB" "$4" "$TAB" "${5:-}"; }
+_b_ok_row() { printf 'B%s外部脳%sok%sOK' "$TAB" "$TAB" "$TAB"; }
+
+# WU-F（要件 §7）＝WU-A の期待 P 行 5 行＋B 行。配列 _WU_F_LINES へ。
+_wu_f_lines() {
+  _WU_F_LINES=(
+    "$(_p_row 1 p-active 次を進める 稼働中)"
+    "$(_p_row 2 p-past 返答を反映 稼働中)"
+    "$(_p_row 3 p-wait 返事待ち 待ち 2026-09-25T10:00)"
+    "$(_p_row 4 p-waitday 再開 待ち 2026-09-25T00:00)"
+    "$(_p_row 5 p-paused '' 保留)"
+    "$(_b_ok_row)"
+  )
+}
+mk_stub_WU_F() {  # $1=パス
+  _wu_f_lines
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_WU_F_LINES[@]}" | _write_frame_stub "$1"
+}
+# WU-F0＝待ち 0 件（WU-F から待ち 2 行を外し番号を振り直す）。
+mk_stub_WU_F0() {  # $1=パス
+  local l=(
+    "$(_p_row 1 p-active 次を進める 稼働中)"
+    "$(_p_row 2 p-past 返答を反映 稼働中)"
+    "$(_p_row 3 p-paused '' 保留)"
+    "$(_b_ok_row)"
+  )
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${l[@]}" | _write_frame_stub "$1"
+}
+# WU-C＝クランプ用（稼働中 18＋待ち 1＋保留 1＋B）。未クランプ 27 行。
+mk_stub_WU_C() {  # $1=パス
+  local l=() i
+  for ((i = 1; i <= 18; i++)); do
+    l+=("$(_p_row "$i" "$(printf 'proj-%02d' "$i")" 作業 稼働中)")
+  done
+  l+=("$(_p_row 19 p-wait 返事待ち 待ち 2026-09-25T10:00)")
+  l+=("$(_p_row 20 p-paused '' 保留)")
+  l+=("$(_b_ok_row)")
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${l[@]}" | _write_frame_stub "$1"
+}
+# WU-E＝配分用（稼働中 8＋待ち 6＋保留 6＋B・v5.6）。未クランプ 27 行。
+mk_stub_WU_E() {  # $1=パス
+  local l=() i
+  for ((i = 1; i <= 8; i++)); do l+=("$(_p_row "$i" "$(printf 'e-%02d' "$i")" 作業 稼働中)"); done
+  for ((i = 9; i <= 14; i++)); do l+=("$(_p_row "$i" "$(printf 'e-%02d' "$i")" 作業 待ち 2026-09-25T10:00)"); done
+  for ((i = 15; i <= 20; i++)); do l+=("$(_p_row "$i" "$(printf 'e-%02d' "$i")" 作業 保留)"); done
+  l+=("$(_b_ok_row)")
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${l[@]}" | _write_frame_stub "$1"
+}
+# WU-F+12＝待ちブロックに番号 5 の p-nextyear（2027-01-05T09:00）を足し保留を 6 に。
+mk_stub_WU_Fplus12() {  # $1=パス
+  local l=(
+    "$(_p_row 1 p-active 次を進める 稼働中)"
+    "$(_p_row 2 p-past 返答を反映 稼働中)"
+    "$(_p_row 3 p-wait 返事待ち 待ち 2026-09-25T10:00)"
+    "$(_p_row 4 p-waitday 再開 待ち 2026-09-25T00:00)"
+    "$(_p_row 5 p-nextyear 年跨ぎ 待ち 2027-01-05T09:00)"
+    "$(_p_row 6 p-paused '' 保留)"
+    "$(_b_ok_row)"
+  )
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${l[@]}" | _write_frame_stub "$1"
+}
+# WU-F-past＝p-wait の待ち日時を過去（2020-01-01T00:00）に差し替え（区分は待ちのまま）。
+mk_stub_WU_Fpast() {  # $1=パス
+  _wu_f_lines
+  _WU_F_LINES[2]="$(_p_row 3 p-wait 返事待ち 待ち 2020-01-01T00:00)"
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_WU_F_LINES[@]}" | _write_frame_stub "$1"
+}
+# WU-F の B 行 0 行派生（DT-18）。
+mk_stub_WU_F_noB() {  # $1=パス
+  _wu_f_lines
+  unset '_WU_F_LINES[5]'
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_WU_F_LINES[@]}" | _write_frame_stub "$1"
+}
+# WU-F の保留行に next を持たせた派生（DT-21・配色の比較用）。
+mk_stub_WU_F_holdnext() {  # $1=パス
+  _wu_f_lines
+  _WU_F_LINES[4]="$(_p_row 5 p-paused 保留作業 保留)"
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_WU_F_LINES[@]}" | _write_frame_stub "$1"
+}
+
+# WU-Z＝描画側の陰性スタブ群（AC-139）。$1=パス $2=サブID(a..h)。
+# (a)〜(f)(h)＝契約違反（rc=3・応答なし）／(g)＝版ちがい（rc=2）。
+WU_Z_IDS=(a b c d e f g h)
+mk_stub_WU_Z() {
+  local path="$1" id="$2"
+  _wu_f_lines
+  case "$id" in
+    a) _WU_F_LINES[0]="$(_p_row 1 p-active 次を進める 稼働中 2026-09-25T10:00)" ;;  # 稼働中の行に待ち日時
+    b) _WU_F_LINES[2]="$(_p_row 3 p-wait 返事待ち 待ち)" ;;                          # 待ちの行の待ち日時が空
+    c) _WU_F_LINES=(                                                                  # 保留の後に待ち
+         "${_WU_F_LINES[0]}" "${_WU_F_LINES[1]}" "${_WU_F_LINES[2]}" "${_WU_F_LINES[3]}"
+         "${_WU_F_LINES[4]}" "$(_p_row 6 p-late 遅れ 待ち 2026-09-25T10:00)" "${_WU_F_LINES[5]}"
+       ) ;;
+    d) _WU_F_LINES[4]="$(_p_row 5 p-paused 戻り 稼働中)" ;;                           # 待ちの後に稼働中
+    e) _WU_F_LINES[2]="$(_p_row 3 p-wait 返事待ち 待機 2026-09-25T10:00)" ;;         # 区分が待機
+    f) _WU_F_LINES[0]="P${TAB}1${TAB}p-active${TAB}次を進める${TAB}稼働中" ;;          # 欄数が旧版のまま（5欄）
+    g) _compose_frame "Project" "cmux-dock-frame/3" "${_P6_PROJ_LINES_V3[@]}" | _write_frame_stub "$path"; return ;;  # legacy-frame-version fixture
+    h) _WU_F_LINES[2]="$(_p_row 3 p-wait 返事待ち 待ち 来週)" ;;                     # 待ち日時の形が違う
+    *) echo "mk_stub_WU_Z: 未知のサブID: $id" >&2; return 1 ;;
+  esac
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_WU_F_LINES[@]}" | _write_frame_stub "$path"
+}
+# (g) の旧版本体（旧契約の P 行 5 欄・本体は当時の形として正当）。
+_P6_PROJ_LINES_V3=(
+  "P${TAB}1${TAB}p-active${TAB}次を進める${TAB}稼働中"
+  "P${TAB}2${TAB}p-paused${TAB}${TAB}保留"
+  "B${TAB}外部脳${TAB}ok${TAB}OK"
+)
 
 # 48サブIDの完全な集合（AC-111の突合対象）。P-14b・P-14cはそれぞれ内部に
 # 5変種・4変種を持つが、サブIDとしては1つのまま数える（設計 §29.4・

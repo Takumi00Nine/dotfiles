@@ -87,20 +87,20 @@ validate_frame Task "$WORKDIR/p6task.raw" "$WORKDIR/p6task.model"
 assert_eq "AC-134④: P-6′ Task は通常(rc=0)" "0" "$?"
 assert_eq "P-6′ Task の本体行数は6" "6" "$(wc -l < "$WORKDIR/p6task.model" | tr -d ' ')"
 
-# cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）のProject正準
-# フレーム。共有fixture（lib-supply-stubs.sh の mk_stub_P6_project／
-# _p6_proj_lines）を検証1巡目C-1で新契約(/3・B行=外部脳1種)へ更新した
-# ため、以前のようにこのファイル内へ直書きせず共有stubを呼ぶ。
+# cmux-dock-frame/4（v5 §40.4・B行は health-self-explain 設計 v1.2 §6・
+# D-3）のProject正準フレーム。共有fixture（lib-supply-stubs.sh の
+# mk_stub_P6_project／_p6_proj_lines）を検証1巡目C-1で新契約(B行=外部脳
+# 1種)へ、v5でP行6欄へ更新したため、このファイル内へ直書きせず共有stubを呼ぶ。
 mk_stub_P6_project "$WORKDIR/p6proj"
 "$WORKDIR/p6proj" --frame > "$WORKDIR/p6proj.raw"
 validate_frame Project "$WORKDIR/p6proj.raw" "$WORKDIR/p6proj.model"
-assert_eq "project_v3_accepted: /3のProject正準フレームは通常(rc=0)" "0" "$?"
+assert_eq "project_v4_accepted: /4のProject正準フレームは通常(rc=0)" "0" "$?"
 
 # 空のProjectフレーム（P*・B*とも0行）はFR-82#5どおり正当（検証1巡目#8の
 # 回帰・検証2巡目#25①）。差し戻すと body_n==0 を一律拒否してしまい、
 # Vault/外部脳ともに空のときの「稼働中(0)/保留(0)」描画ができなくなる。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
   printf 'E\t0\n'
 } > "$WORKDIR/p6proj_empty.raw"
 validate_frame Project "$WORKDIR/p6proj_empty.raw" "$WORKDIR/p6proj_empty.model"
@@ -110,30 +110,30 @@ assert_eq "空のProjectフレームの本体行数は0" "0" "$(wc -l < "$WORKDI
 # AC-134③: Project要求で#Vをcmux-dock-frame/2にしたP-6(Project)→版ちがい
 {
   printf '#V\tcmux-dock-frame/2\tProject\n'
-  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\t\n'
   printf 'E\t1\n'
 } > "$WORKDIR/ac134c.raw"
 validate_frame Project "$WORKDIR/ac134c.raw" "$WORKDIR/ac134c.model"
 assert_eq "AC-134③: Project要求で#Vが/2は版ちがい(rc=2)" "2" "$?"
 
 # project_v1_is_version_mismatch_rc2: 旧Project契約(cmux-dock-frame/1)は
-# 非互換の版上げ（health-self-explain 設計v1.2 §6・D-3）後は版ちがい
-# (rc=2)。契約が本当に/3へ上がっていることの陽性検査。
+# 非互換の版上げ（health-self-explain 設計v1.2 §6・D-3・v5 §40.4）後は
+# 版ちがい(rc=2)。契約が本当に上がっていることの陽性検査。
 {
   printf '#V\tcmux-dock-frame/1\tProject\n'
-  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\t\n'
   printf 'E\t1\n'
 } > "$WORKDIR/proj_v1.raw"
 validate_frame Project "$WORKDIR/proj_v1.raw" "$WORKDIR/proj_v1.model"
 assert_eq "project_v1_is_version_mismatch_rc2: 旧/1は版ちがい(rc=2)" "2" "$?"
 
-echo "=== Project B行契約 cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3） ==="
+echo "=== Project B行契約（health-self-explain 設計 v1.2 §6・D-3・/4でも不変） ==="
 
 # project_b_row_zero_is_valid: P行があってもB行0行は正当(rc=0・判定機が
 # 動かないとき等の縮退＝FR-15の例外)。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
-  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\t\n'
   printf 'E\t1\n'
 } > "$WORKDIR/proj_b0.raw"
 validate_frame Project "$WORKDIR/proj_b0.raw" "$WORKDIR/proj_b0.model"
@@ -141,7 +141,7 @@ assert_eq "project_b_row_zero_is_valid: P行ありB行0行は通常(rc=0)" "0" "
 
 # project_b_error_value_accepted: warn=errorは正当(rc=0・本人裁定OQ-1)。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
   printf 'B\t外部脳\terror\tERROR\n'
   printf 'E\t1\n'
 } > "$WORKDIR/proj_b_error.raw"
@@ -151,7 +151,7 @@ assert_eq "project_b_error_value_accepted: warn=errorは通常(rc=0)" "0" "$?"
 # project_b_rows_two_rc3: B行が2行は契約違反(rc=3・種別を問わずB行は
 # 高々1行＝設計v1.2 §6のcnt_tana/cnt_week検査の置換)。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
   printf 'B\t外部脳\tok\tOK\n'
   printf 'B\t外部脳\tok\tOK\n'
   printf 'E\t2\n'
@@ -162,7 +162,7 @@ assert_eq "project_b_rows_two_rc3: B行2行は応答なし(rc=3)" "3" "$?"
 # project_b_unknown_kind_rc3: 種別が「外部脳」以外は契約違反(rc=3・旧
 # 「棚卸し」「週次」も含め廃止)。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
   printf 'B\t未定義\tok\tOK\n'
   printf 'E\t1\n'
 } > "$WORKDIR/proj_b_kind.raw"
@@ -171,7 +171,7 @@ assert_eq "project_b_unknown_kind_rc3: 種別が外部脳以外は応答なし(r
 
 # project_b_unknown_warn_rc3: warn値がok/warn/error以外は契約違反(rc=3)。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
   printf 'B\t外部脳\tcritical\tX\n'
   printf 'E\t1\n'
 } > "$WORKDIR/proj_b_warn.raw"
@@ -179,11 +179,11 @@ validate_frame Project "$WORKDIR/proj_b_warn.raw" "$WORKDIR/proj_b_warn.model"
 assert_eq "project_b_unknown_warn_rc3: warn値が3値以外は応答なし(rc=3)" "3" "$?"
 
 # project_p_rows_unchanged: P行の文法（区分の並び＝保留の後に稼働中は
-# 不可）は/3でも不変。
+# 不可）は/4でも不変。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
-  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t保留\n'
-  printf 'P\t6\ttakumi009-ai-env\t\t稼働中\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t保留\t\n'
+  printf 'P\t6\ttakumi009-ai-env\t\t稼働中\t\n'
   printf 'E\t2\n'
 } > "$WORKDIR/proj_p_order.raw"
 validate_frame Project "$WORKDIR/proj_p_order.raw" "$WORKDIR/proj_p_order.model"
@@ -218,8 +218,8 @@ echo "=== validate_frame（DT-12・正当な空欄を含むフレーム） ==="
 # （述語は変わらない＝§39.7.2）。
 
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
-  printf 'P\t1\tproj-a\t\t稼働中\n'   # next値が空
+  printf '#V\tcmux-dock-frame/4\tProject\n'
+  printf 'P\t1\tproj-a\t\t稼働中\t\n'   # next値が空
   printf 'E\t1\n'
 } > "$WORKDIR/dt12_p.raw"
 validate_frame Project "$WORKDIR/dt12_p.raw" "$WORKDIR/dt12_p.model"
@@ -248,7 +248,7 @@ assert_eq "P-31(Task種別でcmux-dock-frame/1・v3形)はAI環境 版ちがい�
 
 # Project専用の4サブID（P-12b・P-12c・P-19a・P-19b）は検証1巡目C-1で
 # 共有fixture（cmux/tests/lib-supply-stubs.sh の mk_stub_P_violation）側を
-# 新契約（/3・B行=外部脳1種）へ更新したため、他のIDと同じ汎用経路で
+# 新契約（B行=外部脳1種・v5でP行6欄）へ更新したため、他のIDと同じ汎用経路で
 # そのまま生成できる（以前このファイル内に持っていた重複実装
 # _mk_project_violation_v3 は削除）。
 
@@ -297,6 +297,60 @@ EXPECT_SORTED="$(printf '%s\n' "${SUPPLY_VIOLATION_IDS[@]}" | sort -u)"
 ACTUAL_SORTED="$(printf '%s\n' "${IMPLEMENTED_IDS[@]}" | sort -u)"
 assert_eq "AC-111: 実装したケースのサブID集合が48件の集合と完全一致" "$EXPECT_SORTED" "$ACTUAL_SORTED"
 assert_eq "サブID集合はちょうど48件" "48" "$(printf '%s\n' "${SUPPLY_VIOLATION_IDS[@]}" | sort -u | wc -l | tr -d ' ')"
+
+echo "=== v5: AC-139 契約検証 /4（WU-F 受理・WU-Z 陰性・設計 §40.4） ==="
+
+# v5_ac139_accept_WU_F: WU-F（P行5行・6欄＋B行）が通常(rc=0)・本体行6行。
+mk_stub_WU_F "$WORKDIR/wu_f"
+"$WORKDIR/wu_f" --frame > "$WORKDIR/wu_f.raw"
+validate_frame Project "$WORKDIR/wu_f.raw" "$WORKDIR/wu_f.model"
+assert_eq "v5_ac139_accept_WU_F: WU-Fは通常(rc=0)" "0" "$?"
+assert_eq "v5_ac139_accept_WU_F: 本体行は6行" "6" "$(wc -l < "$WORKDIR/wu_f.model" | tr -d ' ')"
+assert_eq "v5_ac139_accept_WU_F: 待ち行の第6欄が保存される" \
+  "$(printf 'P\t3\tp-wait\t返事待ち\t待ち\t2026-09-25T10:00')" "$(sed -n '3p' "$WORKDIR/wu_f.model")"
+assert_eq "v5_ac139_accept_WU_F: #Vの版は cmux-dock-frame/4" "cmux-dock-frame/4" "$CMUX_FRAME_VERSION_PROJECT"
+
+# v5_ac139_reject_WU_Z: (a)〜(f)(h)は応答なし(rc=3)・(g)だけ版ちがい(rc=2)。
+# fetch_frame 経由で縮退文言まで見る。実装した集合と WU_Z_IDS を突合（AC-111と同型）。
+WUZ_FAIL=0
+WUZ_IMPLEMENTED=()
+for id in "${WU_Z_IDS[@]}"; do
+  path="$WORKDIR/wuz_$id"
+  mk_stub_WU_Z "$path" "$id" 2>/dev/null || { WUZ_FAIL=$(( WUZ_FAIL + 1 )); echo "  生成失敗: $id"; continue; }
+  SUPPLY_PGID=""; WATCH_PGID=""; RAW=""; RCF=""; DONE=""; TOUT=""; MODEL=""
+  fetch_frame Project "$path"
+  case "$id" in
+    g) expect="AI環境 版ちがい" ;;
+    *) expect="AI環境 応答なし" ;;
+  esac
+  if [ "$FRAME_REASON" = "$expect" ]; then
+    WUZ_IMPLEMENTED+=("$id")
+  else
+    WUZ_FAIL=$(( WUZ_FAIL + 1 )); echo "  WU-Z($id): 期待[$expect] 実際[$FRAME_REASON]"
+  fi
+  [ -n "${MODEL:-}" ] && { rm -f -- "$MODEL"; MODEL=""; }
+done
+assert_eq "v5_ac139_reject_WU_Z: (a)〜(f)(h)=応答なし・(g)=版ちがい" "0" "$WUZ_FAIL"
+assert_eq "v5_ac139_reject_WU_Z: 実装した陰性ケースの集合が(a)〜(h)の8件と一致" \
+  "$(printf '%s\n' "${WU_Z_IDS[@]}" | sort -u)" "$(printf '%s\n' "${WUZ_IMPLEMENTED[@]}" | sort -u)"
+assert_eq "v5_ac139_reject_WU_Z: WU-Zはちょうど8件" "8" "$(printf '%s\n' "${WU_Z_IDS[@]}" | sort -u | wc -l | tr -d ' ')"
+
+# v5_ac138_no_v3_literal_dotfiles: dotfiles の追跡ファイルで旧版リテラルが
+# 行単位0件（AC-138 の dotfiles 側＝R-v5-13）。除外＝docs/*archive*・
+# requirements-v5(-notes).md のパス、行末が `# legacy-frame-version fixture`
+# の行。マーカー行は WU-Z (g) の1行だけ（行ごと消した実装を通さない）。
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LEGACY_LIT="$(printf 'cmux-dock-frame/%s' 3)"
+if git -C "$REPO_ROOT" ls-files -z > "$WORKDIR/tracked.z" 2>/dev/null && [ -s "$WORKDIR/tracked.z" ]; then
+  ( cd "$REPO_ROOT" && xargs -0 grep -n -F -- "$LEGACY_LIT" < "$WORKDIR/tracked.z" ) > "$WORKDIR/legacy_hits.txt" 2>/dev/null
+  LEGACY_MARKED="$(grep -c '# legacy-frame-version fixture$' "$WORKDIR/legacy_hits.txt" | tr -d ' ')"
+  LEGACY_REST="$(grep -v '# legacy-frame-version fixture$' "$WORKDIR/legacy_hits.txt" \
+    | grep -vE '^docs/[^:]*archive[^:]*:|^[^:]*requirements-v5(-notes)?\.md:' | wc -l | tr -d ' ')"
+  assert_eq "v5_ac138_no_v3_literal_dotfiles: マーカー無しの旧版リテラル行が0件" "0" "$LEGACY_REST"
+  assert_eq "v5_ac138_no_v3_literal_dotfiles: マーカー行はちょうど1行(WU-Z (g))" "1" "$LEGACY_MARKED"
+else
+  echo "  (skip) git ls-files が使えない＝追跡ファイルの走査を省略"
+fi
 
 echo "=== DT-8（判定順の分離） ==="
 

@@ -6,16 +6,26 @@
 # 縮退する（FR-68）。呼び出し口は環境変数 CMUX_DOCK_SUPPLY_PROJECT で上書き
 # できる（既定はリポジトリ内の絶対パス）。
 #
-# 表示例（外部脳ヘルス行はDock契約 cmux-dock-frame/3＝health-self-explain
-# 設計 v1.2 §6・D-3。1行3値＋末尾付記のみ・見出し行は出さない）:
+# 表示例（契約 cmux-dock-frame/4＝v5 §40.4。区分は 稼働中／待ち／保留 の
+# 3ブロック（待ち0件のときは待ちブロックごと出さない）。待ちの行は末尾に
+# 待ち日時（供給側が Vault の `wait_until:` から正規化した値）の短縮形
+# `M/D HH:MM` を付ける。外部脳ヘルス行は health-self-explain 設計 v1.2
+# §6・D-3＝1行3値＋末尾付記のみ・見出し行は出さない）:
 #   ▶ 稼働中 (2)
 #   5 svwb-pilot 実データ照合を回す
 #   6 takumi009- (next未設定)
 #
+#   ⏸ 待ち (1)
+#   7 p-wait 返事待ち 9/25 10:00
+#
 #   ⏸ 保留 (1)
-#   7 avatar-swi 配布方式のたたき台を書く
+#   8 avatar-swi 配布方式のたたき台を書く
 #
 #   外部脳 OK 候補390件
+#
+# 高さ（設計 §40.6.1・FR-101）＝①CMUX_NEXT_ROWS（正整数）＞②stty size
+# ＞③h_def=4。書き出しは末尾LFなし（h行をh−1個のLFで書く＝D-v5-6）。
+# 幅＝CMUX_NEXT_COLS（正整数）＞ stty size（上限 CMUX_DOCK_MAX_COLS）。
 #
 # 引数: （なし）＝常駐 / --once＝1フレーム出して終了。--list は供給側
 # （cmux-next-model.sh --list）へ移設済みで、この常駐は提供しない
@@ -25,7 +35,9 @@
 
 set -u
 
-LIB_DIR="$(cd -P "$(dirname "$0")" && pwd)/.."
+# source されたとき（A-v5-4・DT-22）も自分の場所から lib を引けるよう
+# BASH_SOURCE を優先する（直接実行では $0 と同じ）。
+LIB_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/.."
 if [ ! -r "$LIB_DIR/lib-dock-view.sh" ]; then
   echo "cmux-next-watch: lib-dock-view.sh が見つかりません: $LIB_DIR/lib-dock-view.sh" >&2
   exit 1
@@ -54,15 +66,28 @@ GOOD_C="${ESC}[38;5;114m"
 WARN_C="${ESC}[38;5;214m"
 # 外部脳ヘルスのERROR用に赤1色を追加（本人裁定OQ-1・2026-09-20・
 # health-self-explain 設計 v1.2 §6）。WARN_BOLD/GOOD_BOLDは外部脳ブロック
-# の見出し行専用だったが、見出し行を出さない契約（cmux-dock-frame/3）に
+# の見出し行専用だったが、見出し行を出さない契約（v1.2 §6以降）に
 # なったため不要＝退役。
 ERR_C="${ESC}[38;5;203m"
 
-cols_now() { term_cols ""; }
+# 幅の上書き口（A-v5-1・CMUX_TASK_COLS と同型）。tty の有無に依らず幅を
+# 固定できる（AC-141・AC-143⑦）。上限の丸め（CMUX_DOCK_MAX_COLS）は
+# term_cols 側で不変。
+COLS_OVERRIDE="${CMUX_NEXT_COLS:-}"
+cols_now() { term_cols "$COLS_OVERRIDE"; }
+
+# 高さ（FR-101 ①②③）＝term_rows（①CMUX_NEXT_ROWS／②stty size）が
+# 取得不能（0）なら h_def=4（設計 §40.6.1）。
+resolve_rows() {
+  local r
+  r=$(term_rows "$ROWS_OVERRIDE")
+  is_number "$r" && [ "$r" -ge 1 ] || r=4
+  printf '%s' "$r"
+}
 
 # --- フレーム由来のモデル ---------------------------------------------------
 FRAME_REASON=""
-P_NUM=(); P_NAME=(); P_NEXT=(); P_CAT=()
+P_NUM=(); P_NAME=(); P_NEXT=(); P_CAT=(); P_WAIT=()
 B_KIND=(); B_WARN=(); B_TEXT=()
 
 SUPPLY_PGID=""; WATCH_PGID=""; RAW=""; RCF=""; DONE=""; TOUT=""; MODEL=""
@@ -71,7 +96,7 @@ DRAWING=0
 # $MODEL（lib-supply-frame.sh が検証済みの本体行）から P_*/B_* 配列を
 # 組み立てる。番号は供給側が振った値をそのまま使う（FR-63）。
 load_model_from_frame() {
-  P_NUM=(); P_NAME=(); P_NEXT=(); P_CAT=()
+  P_NUM=(); P_NAME=(); P_NEXT=(); P_CAT=(); P_WAIT=()
   B_KIND=(); B_WARN=(); B_TEXT=()
 
   local line
@@ -84,6 +109,7 @@ load_model_from_frame() {
         P_NAME+=("${TSV_F[2]}")
         P_NEXT+=("${TSV_F[3]}")
         P_CAT+=("${TSV_F[4]}")
+        P_WAIT+=("${TSV_F[5]}")   # split_tsv は空欄を畳まない（空の第6欄も保存される）
         ;;
       B)
         B_KIND+=("${TSV_F[1]}")
@@ -94,68 +120,65 @@ load_model_from_frame() {
   done < "$MODEL"
 }
 
-# --- 描画（設計 §31.4・表示規則は不変） -------------------------------------
+# --- 描画（設計 §31.4・v5 §40.6） ---------------------------------------------
+
+# 待ち日時（検証済みの YYYY-MM-DDTHH:MM）の短縮形 `M/D HH:MM`（FR-98・
+# FR-99「固定の変換」）。パラメータ展開だけで date は呼ばない（D-v5-5）。
+# 形が違う値（16文字未満）は防御としてそのまま返す（F-94・到達しない）。
+short_wait() {
+  local v="$1" m d
+  if [ "${#v}" -lt 16 ]; then printf '%s' "$v"; return; fi
+  m="${v:5:2}"; d="${v:8:2}"; m="${m#0}"; d="${d#0}"
+  printf '%s/%s %s' "$m" "$d" "${v:11:5}"
+}
 
 # P_NUM[$1] 他1件ぶんのエントリ行を描く（幅は $2、既定は現在の端末幅）。
+# 待ちの行は末尾に短縮形（DIM）を付け、next 欄だけを切り詰める（FR-98）。
+# 色は稼働中・保留・待ちとも同じ（番号 DIM・名前 LBL・next LBL＝R-v5-14）。
 _render_entry_line() {
   local i="$1" cols="${2:-}"
   [ -n "$cols" ] || cols="$(cols_now)"
-  local num="${P_NUM[$i]}" name="${P_NAME[$i]}" nextraw="${P_NEXT[$i]}"
-  local numw=${#num} name_disp name_len remw next_disp
+  local num="${P_NUM[$i]}" name="${P_NAME[$i]}" nextraw="${P_NEXT[$i]}" wait="${P_WAIT[$i]:-}"
+  local numw=${#num} name_disp name_len remw next_disp next_c short sw=0
   name_disp="$(truncate_plain "$name" 10)"
   name_len="$(disp_width "$name_disp")"
   is_number "$name_len" || name_len=10
-  remw=$(( cols - numw - 1 - name_len - 1 ))
+  if [ "${P_CAT[$i]}" = "待ち" ] && [ -n "$wait" ]; then
+    short="$(short_wait "$wait")"
+    sw=${#short}   # ASCII のみ＝幅＝長さ
+    remw=$(( cols - numw - 1 - name_len - 1 - sw - 1 ))
+  else
+    short=""
+    remw=$(( cols - numw - 1 - name_len - 1 ))
+  fi
   [ "$remw" -lt 1 ] && remw=1
   if [ -z "$nextraw" ]; then
     next_disp="$(truncate_disp "(next未設定)" "$remw")"
-    printf '%s%s%s %s%s%s %s%s%s\n' "$DIM" "$num" "$RESET" "$LBL" "$name_disp" "$RESET" "$DIM" "$next_disp" "$RESET"
+    next_c="$DIM"
   else
     next_disp="$(truncate_disp "$nextraw" "$remw")"
-    printf '%s%s%s %s%s%s %s%s%s\n' "$DIM" "$num" "$RESET" "$LBL" "$name_disp" "$RESET" "$LBL" "$next_disp" "$RESET"
+    next_c="$LBL"
+  fi
+  if [ -n "$short" ]; then
+    printf '%s%s%s %s%s%s %s%s%s %s%s%s\n' "$DIM" "$num" "$RESET" "$LBL" "$name_disp" "$RESET" "$next_c" "$next_disp" "$RESET" "$DIM" "$short" "$RESET"
+  else
+    printf '%s%s%s %s%s%s %s%s%s\n' "$DIM" "$num" "$RESET" "$LBL" "$name_disp" "$RESET" "$next_c" "$next_disp" "$RESET"
   fi
 }
 
-# 稼働中・保留の見出しの件数は P_CAT の全件数（クランプ前）から数える
-# （FR-72 #2「各区分の見出しの件数はlistのその区分の全行数と一致」）。
-# $1（省略可）＝表示するエントリ件数の上限。省略時は全件表示（クランプ無し）。
-render_next() {
-  local limit="${1:--1}"
-  local n=${#P_NUM[@]} i count_a=0 count_h=0
-  for ((i = 0; i < n; i++)); do
-    if [ "${P_CAT[$i]}" = "保留" ]; then count_h=$(( count_h + 1 )); else count_a=$(( count_a + 1 )); fi
-  done
-
-  printf '%s▶ 稼働中 (%d)%s\n' "$LBL_BOLD" "$count_a" "$RESET"
-  local cols
-  cols="$(cols_now)"
-
-  local shown_n="$n"
-  [ "$limit" -ge 0 ] && [ "$limit" -lt "$n" ] && shown_n="$limit"
-
-  local cur_grp="A" printed_hold_header=0
-  for ((i = 0; i < shown_n; i++)); do
-    local cat="${P_CAT[$i]}" grp
-    if [ "$cat" = "保留" ]; then grp="H"; else grp="A"; fi
-    if [ "$grp" = "H" ] && [ "$cur_grp" != "H" ]; then
-      printf '\n%s⏸ 保留 (%d)%s\n' "$DIM_BOLD" "$count_h" "$RESET"
-      cur_grp="H"
-      printed_hold_header=1
-    fi
-    _render_entry_line "$i" "$cols"
-  done
-  if [ "$shown_n" -lt "$n" ]; then
-    printf '%s…他%d行%s\n' "$DIM" "$(( n - shown_n ))" "$RESET"
-  fi
-  if [ "$printed_hold_header" -eq 0 ]; then
-    printf '\n%s⏸ 保留 (%d)%s\n' "$DIM_BOLD" "$count_h" "$RESET"
-  fi
+# 区分の見出し行。$1=区分 $2=件数（P_CAT の全件数＝クランプ前・FR-97）。
+_render_heading() {
+  case "$1" in
+    稼働中) printf '%s▶ 稼働中 (%d)%s\n' "$LBL_BOLD" "$2" "$RESET" ;;
+    待ち)   printf '%s⏸ 待ち (%d)%s\n' "$DIM_BOLD" "$2" "$RESET" ;;
+    *)      printf '%s⏸ 保留 (%d)%s\n' "$DIM_BOLD" "$2" "$RESET" ;;
+  esac
 }
 
 # 外部脳ヘルス行（B_*が0行ならブロックごと出さない＝FR-68・AC-97②）。
-# Dock契約 cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）＝
-# 見出し行は出さず、B行を1行だけ `<色><kind> <text>` で描く（B行は
-# lib-supply-frame.sh の validate_frame が既に高々1行に絞っている）。
+# health-self-explain 設計 v1.2 §6・D-3＝見出し行は出さず、B行を1行だけ
+# `<色><kind> <text>` で描く（B行は lib-supply-frame.sh の validate_frame
+# が既に高々1行に絞っている）。
 render_extbrain() {
   local n=${#B_KIND[@]}
   [ "$n" -eq 0 ] && return
@@ -174,55 +197,117 @@ render_extbrain() {
   printf '%s%s %s%s\n' "$color" "$kind" "$text" "$RESET"
 }
 
-render() {
-  render_next
-  printf '\n'
-  render_extbrain
+# クランプ時の配分（FR-100 ②・設計 §40.6.3 distribute_rows・D-v5-11）。
+# 純関数（bash 3.2 の整数演算だけ）。$1=R（残り行数） $2=nA $3=nW $4=nH
+# （各ブロックの全件数・待ちブロックの有無は nW>0 で決まる）→ stdout に
+# "kA kW kH"（各ブロックの残し数）。
+#   (1) R を表示するブロック数（待ち0件なら2）で割って均等（床）
+#   (2) 余りは 稼働中→待ち→保留 の順に1行ずつ
+#   (3) 件数が配分より少ないブロックの余剰を回収し、同じ順で空きのある
+#       ブロックへ1行ずつ回す（回し切るまで繰り返す）
+# 性質＝R ≤ n のとき kA+kW+kH = R・k_b ≤ n_b（DT-22）。
+distribute_rows() {
+  local R="$1" nA="$2" nW="$3" nH="$4"
+  local nbk=2 base rem kA kW kH surplus moved
+  [ "$nW" -gt 0 ] && nbk=3
+  base=$(( R / nbk )); rem=$(( R % nbk ))
+  kA=$base; kH=$base
+  if [ "$nW" -gt 0 ]; then kW=$base; else kW=0; fi
+  # (2) 余り（rem < nbk）を順の先頭から +1
+  if [ "$rem" -ge 1 ]; then kA=$(( kA + 1 )); fi
+  if [ "$rem" -ge 2 ]; then
+    if [ "$nW" -gt 0 ]; then kW=$(( kW + 1 )); else kH=$(( kH + 1 )); fi
+  fi
+  # (3) 回収
+  surplus=0
+  if [ "$kA" -gt "$nA" ]; then surplus=$(( surplus + kA - nA )); kA=$nA; fi
+  if [ "$kW" -gt "$nW" ]; then surplus=$(( surplus + kW - nW )); kW=$nW; fi
+  if [ "$kH" -gt "$nH" ]; then surplus=$(( surplus + kH - nH )); kH=$nH; fi
+  # (3) 回し（空きが無くなるか surplus が尽きるまで）
+  while [ "$surplus" -gt 0 ]; do
+    moved=0
+    if [ "$surplus" -gt 0 ] && [ "$kA" -lt "$nA" ]; then kA=$(( kA + 1 )); surplus=$(( surplus - 1 )); moved=1; fi
+    if [ "$surplus" -gt 0 ] && [ "$kW" -lt "$nW" ]; then kW=$(( kW + 1 )); surplus=$(( surplus - 1 )); moved=1; fi
+    if [ "$surplus" -gt 0 ] && [ "$kH" -lt "$nH" ]; then kH=$(( kH + 1 )); surplus=$(( surplus - 1 )); moved=1; fi
+    [ "$moved" -eq 1 ] || break   # 空きが無い＝R > n（クランプ時は到達しない・防御）
+  done
+  printf '%s %s %s' "$kA" "$kW" "$kH"
 }
 
-# フレームをペインの表示行数に収める（高さ超過時はエントリ行を後ろから
-# 畳んで「…他N行」に置き換え、外部脳は常に残す）。稼働中・保留の見出しは
-# クランプの有無に関わらず必ず出し、件数は常に未クランプの全件数
-# （FR-72 #2・AC-90④＝「落ちた行の分だけ減らない」）。
+# 3ブロック（稼働中→待ち→保留）＋外部脳を組む（設計 §40.6.3 build）。
+# $1=クランプ有無(0/1) $2=kA $3=kW $4=kH（各ブロックで先頭から残す行数）。
+# 見出しの件数は常にクランプ前の全件数（FR-97）。見出しは件数0でも出す
+# （落ちたブロックの見出しも残す＝FR-100 ①）。待ち0件のときは待ちブロック
+# ごと出さない。`…他N行` はクランプ時に末尾（保留ブロックの後）に1行だけ。
+# P_* 配列は --list の順（稼働中→待ち→保留・validate_frame が順位の
+# 非減少を保証）なので添字範囲で各ブロックを描く。
+build_lines() {
+  local clamp="$1" kA="$2" kW="$3" kH="$4"
+  local n=${#P_NUM[@]} i cnt_a=0 cnt_w=0 cnt_h=0
+  for ((i = 0; i < n; i++)); do
+    case "${P_CAT[$i]}" in
+      待ち) cnt_w=$(( cnt_w + 1 )) ;;
+      保留) cnt_h=$(( cnt_h + 1 )) ;;
+      *)    cnt_a=$(( cnt_a + 1 )) ;;
+    esac
+  done
+  local cols
+  cols="$(cols_now)"
+
+  _render_heading 稼働中 "$cnt_a"
+  for ((i = 0; i < kA; i++)); do _render_entry_line "$i" "$cols"; done
+  if [ "$cnt_w" -gt 0 ]; then
+    printf '\n'; _render_heading 待ち "$cnt_w"
+    for ((i = cnt_a; i < cnt_a + kW; i++)); do _render_entry_line "$i" "$cols"; done
+  fi
+  printf '\n'; _render_heading 保留 "$cnt_h"
+  for ((i = cnt_a + cnt_w; i < cnt_a + cnt_w + kH; i++)); do _render_entry_line "$i" "$cols"; done
+  if [ "$clamp" -eq 1 ]; then
+    printf '%s…他%d行%s\n' "$DIM" "$(( n - (kA + kW + kH) ))" "$RESET"
+  fi
+  if [ "${#B_KIND[@]}" -gt 0 ]; then
+    printf '\n'; render_extbrain
+  fi
+}
+
+# フレームをペインの高さ h に収める（設計 §40.6.3・FR-100・FR-101）。
+#   fixed = 見出し数 + ブロック間の空行 + 外部脳(空行+行)
+#   fixed + n ≤ h → クランプなし（全ブロック全件）
+#   それ以外 → R = h − (fixed + 1)（`…他N行` を固定行に数える＝§40.2 M-5
+#   の修正）を distribute_rows で3ブロックへ配分（FR-100 ②）。
+#   組んだ行数が h を超える（h ≤ fixed）ときは先頭 h 行に退化（D-v5-4・
+#   R=0 → 0/0/0 で規則と矛盾しない）。
+# 各行を LF 終端で出す（--once はこれがそのまま出力。常駐は $( ) で末尾
+# LF を落として書く＝h 行を h−1 個の LF で）。
 compose_frame() {
   if [ -n "$FRAME_REASON" ]; then
     printf '%s\n' "$FRAME_REASON"
     return
   fi
-  local n=${#P_NUM[@]}
-  local ext_out n_ext n_b=${#B_KIND[@]}
-  ext_out="$(render_extbrain)"
-  n_ext=$n_b   # 見出し行が無い契約（/3）なのでB行数がそのまま外部脳ブロックの行数
-
-  local rows avail
-  rows=$(term_rows "$ROWS_OVERRIDE")
-  avail=$(( rows - 1 ))
-
-  if [ "$rows" -lt 4 ]; then
-    render_next
-    printf '\n'
-    render_extbrain
-    return
+  local n=${#P_NUM[@]} i nA=0 nW=0 nH=0 nb=${#B_KIND[@]}
+  for ((i = 0; i < n; i++)); do
+    case "${P_CAT[$i]}" in
+      待ち) nW=$(( nW + 1 )) ;;
+      保留) nH=$(( nH + 1 )) ;;
+      *)    nA=$(( nA + 1 )) ;;
+    esac
+  done
+  local blocks=2 ext=0 fixed h R clamp kA kW kH
+  [ "$nW" -gt 0 ] && blocks=3
+  [ "$nb" -gt 0 ] && ext=2
+  fixed=$(( blocks + (blocks - 1) + ext ))
+  h="$(resolve_rows)"
+  if [ $(( fixed + n )) -le "$h" ]; then
+    clamp=0; kA=$nA; kW=$nW; kH=$nH
+  else
+    clamp=1
+    R=$(( h - (fixed + 1) ))
+    [ "$R" -lt 0 ] && R=0
+    read -r kA kW kH <<EOF_DIST
+$(distribute_rows "$R" "$nA" "$nW" "$nH")
+EOF_DIST
   fi
-
-  # 未クランプで組んだときの行数＝3(稼働中見出し・保留見出し・その前の空行)＋n
-  local full_next_lines=$(( 3 + n ))
-  local total=$(( full_next_lines + 1 + n_ext ))
-  if [ "$total" -le "$avail" ]; then
-    render_next
-    printf '\n'
-    render_extbrain
-    return
-  fi
-
-  # クランプが要る: 省略行1行ぶんを見込んで entry の表示件数を決める。
-  local limit=$(( avail - 4 - n_ext ))
-  [ "$limit" -lt 0 ] && limit=0
-  [ "$limit" -gt "$n" ] && limit="$n"
-  render_next "$limit"
-  if [ "$n_ext" -gt 0 ]; then
-    printf '\n%s\n' "$ext_out"
-  fi
+  build_lines "$clamp" "$kA" "$kW" "$kH" | head -n "$h"
 }
 
 # --- 取得（供給側1回・fetch_frame） ----------------------------------------
@@ -298,7 +383,9 @@ main() {
     frame="$(compose_frame | sed "s/\$/${ESC}[K/")"
     if [ "$frame" != "$last_frame" ] || [ "$force_redraw" -eq 1 ] || [ $(( now - last_redraw )) -ge "$REDRAW_HEARTBEAT" ]; then
       DRAWING=1
-      printf '\033[?2026h\033[H%s\n\033[J\033[?2026l' "$frame"
+      # 末尾 LF なし（D-v5-6）＝最下行の LF で 1 行スクロールして先頭行が
+      # 隠れる（§40.2 M-5）のを防ぐ。ESC[J が末尾行の末尾から画面末までを消す。
+      printf '\033[?2026h\033[H%s\033[J\033[?2026l' "$frame"
       DRAWING=0
       last_frame="$frame"
       last_redraw="$now"
@@ -308,4 +395,9 @@ main() {
   done
 }
 
-main "$@"
+# source ガード（A-v5-4・cmux-next-model.sh と同じ型）＝テストが
+# distribute_rows を純関数として直接呼べるようにする。直接実行時は従来
+# どおり main が走る。
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  main "$@"
+fi

@@ -8,12 +8,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CMUX_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WATCH="$SCRIPT_DIR/../cmux-next-watch.sh"
 STUBS="$CMUX_DIR/tests/lib-supply-stubs.sh"
+TICKLIB="$CMUX_DIR/tests/lib-tick-bytes.sh"
 
 [ -r "$WATCH" ] || { echo "FATAL: 見つかりません: $WATCH" >&2; exit 1; }
 [ -r "$STUBS" ] || { echo "FATAL: 見つかりません: $STUBS" >&2; exit 1; }
+[ -r "$TICKLIB" ] || { echo "FATAL: 見つかりません: $TICKLIB" >&2; exit 1; }
 . "$CMUX_DIR/lib-dock-view.sh"
 . "$CMUX_DIR/lib-supply-frame.sh"
 . "$STUBS"
+. "$TICKLIB"
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/test-cmux-next-watch.XXXXXX")" || {
   echo "FATAL: mktemp -d に失敗しました" >&2
@@ -55,8 +58,8 @@ now_mono() { python3 -c 'import time; print(time.monotonic())'; }
 
 # --- Project v3 フレーム生成（health-self-explain 設計 v1.2 §6・D-3） ------
 # 検証1巡目C-1で共有fixture（cmux/tests/lib-supply-stubs.sh の
-# mk_stub_P6_project／_p6_proj_lines）を新契約（cmux-dock-frame/3・B行=
-# 外部脳1種・bkind/bwarn/btextの上書き対応）へ更新したため、このファイル
+# mk_stub_P6_project／_p6_proj_lines）を新契約（B行=外部脳1種・
+# bkind/bwarn/btextの上書き対応・v5でP行6欄）へ更新したため、このファイル
 # 内に同じ組み立てを重複実装せず共有stubをそのまま呼ぶ。P行の既定値は
 # _p6_proj_linesの既定と同一（既存の期待値EXPECT_P6等をそのまま流用
 # できる）。
@@ -74,9 +77,8 @@ wait_pid_bounded() {
   return 1
 }
 
-# Project期待フレーム（8行・空行2行を含む。外部脳ヘルス行はDock契約
-# cmux-dock-frame/3＝health-self-explain 設計 v1.2 §6・D-3＝見出し行なし
-# の1行）。
+# Project期待フレーム（8行・空行2行を含む。外部脳ヘルス行は
+# health-self-explain 設計 v1.2 §6・D-3＝見出し行なしの1行）。
 EXPECT_P6="$(printf '▶ 稼働中 (2)\n5 svwb-pilot 実データ照合を回す\n6 takumi009- (next未設定)\n\n⏸ 保留 (1)\n7 avatar-swi 配布方式のたたき台を書く\n\n外部脳 OK')"
 
 echo "=== AC-91: Project期待フレーム8行との完全一致（色なし比較） ==="
@@ -85,7 +87,7 @@ OUT="$(CMUX_NEXT_ROWS=40 run_watch "$WORKDIR/p6" --once | sed -E $'s/\x1b\\[[0-9
 assert_eq "AC-91: --once の出力(色除去後)が期待フレームと完全一致" "$EXPECT_P6" "$OUT"
 assert_eq "AC-91: 行数は8(見出し行が無くなった分だけ旧v3.5の10行より減る)" "8" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
 
-echo "=== 外部脳ヘルス行（cmux-dock-frame/3・health-self-explain 設計 v1.2 §6） ==="
+echo "=== 外部脳ヘルス行（health-self-explain 設計 v1.2 §6） ==="
 assert_true "extbrain_no_heading_one_line: ⚠/✅の見出し行が0件" \
   "$(printf '%s\n' "$OUT" | grep -qE '⚠ 外部脳|✅ 外部脳' && echo 0 || echo 1)"
 assert_true "extbrain_no_heading_one_line: 外部脳ブロックはちょうど1行" \
@@ -93,10 +95,12 @@ assert_true "extbrain_no_heading_one_line: 外部脳ブロックはちょうど1
 
 # extbrain_three_colors_error_red: warn値ごとに正しい色が乗る（本人裁定
 # OQ-1のERR_C=38;5;203を含む3色）。色を消さない生出力で見る。
+# v5: 高さが取得不能なら h_def=4（FR-101③）になり tty 無しの実行では
+# 外部脳行が落ちるため、高さを 40 に固定する（期待値は不変・下の suffix も同じ）。
 for spec in "ok:114" "warn:214" "error:203"; do
   bwarn="${spec%%:*}" expect_code="${spec#*:}"
   mk_stub_P6_project "$WORKDIR/color_$bwarn" 5 6 7 外部脳 "$bwarn" "TXT"
-  COLOR_RAW="$(run_watch "$WORKDIR/color_$bwarn" --once)"
+  COLOR_RAW="$(CMUX_NEXT_ROWS=40 run_watch "$WORKDIR/color_$bwarn" --once)"
   assert_true "extbrain_three_colors_error_red(${bwarn}): 38;5;${expect_code}が外部脳行に乗る" \
     "$(printf '%s' "$COLOR_RAW" | grep -qF "$(printf '\033')[38;5;${expect_code}m外部脳 TXT" && echo 1 || echo 0)"
 done
@@ -104,7 +108,7 @@ done
 # extbrain_suffix_candidates_rendered: 末尾の「候補N件」付記（供給側が
 # 付ける・0件も表示＝R-2）をそのまま逐語で描く。
 mk_stub_P6_project "$WORKDIR/suffix" 5 6 7 外部脳 ok "OK 候補390件"
-OUT_SUFFIX="$(run_watch "$WORKDIR/suffix" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+OUT_SUFFIX="$(CMUX_NEXT_ROWS=40 run_watch "$WORKDIR/suffix" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
 assert_true "extbrain_suffix_candidates_rendered: 「外部脳 OK 候補390件」が逐語で出る" \
   "$(printf '%s\n' "$OUT_SUFFIX" | grep -qxF '外部脳 OK 候補390件' && echo 1 || echo 0)"
 
@@ -118,10 +122,10 @@ assert_true "compose_frame_n_ext_equals_n_b: 「…他」行が出ない" \
 
 # version_mismatch_line_unchanged: 旧Project契約(cmux-dock-frame/1)を
 # 名乗るフレームはAC-97③等と同じ縮退文言「AI環境 版ちがい」（値そのもの
-# は/3への非互換版上げで変わったが、縮退時の固定文言は不変）。
+# は非互換版上げで変わったが、縮退時の固定文言は不変）。
 {
   printf '#V\tcmux-dock-frame/1\tProject\n'
-  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\t\n'
   printf 'E\t1\n'
 } > "$WORKDIR/oldver.data"
 cat > "$WORKDIR/oldver" <<'EOF'
@@ -134,8 +138,8 @@ assert_eq "version_mismatch_line_unchanged: 旧/1はAI環境 版ちがい" "AI�
 
 # ヘルス行0行のフレームを直接組み立てる（B行を含まない）。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
-  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
+  printf 'P\t5\tsvwb-pilot-log\t実データ照合を回す\t稼働中\t\n'
   printf 'E\t1\n'
 } > "$WORKDIR/p6_nohealth.data"
 cat > "$WORKDIR/p6_nohealth" <<'EOF'
@@ -208,8 +212,8 @@ cat > "$WORKDIR/spy_supply" <<SPYEOF
 #!/bin/bash
 echo call >> "$SPY_LOG"
 TAB="\$(printf '\t')"
-printf '#V%scmux-dock-frame/3%sProject\n' "\$TAB" "\$TAB"
-printf 'P%s1%sspy%s%s稼働中\n' "\$TAB" "\$TAB" "\$TAB" "\$TAB"
+printf '#V%scmux-dock-frame/4%sProject\n' "\$TAB" "\$TAB"
+printf 'P%s1%sspy%s%s稼働中%s\n' "\$TAB" "\$TAB" "\$TAB" "\$TAB" "\$TAB"
 printf 'E%s1\n' "\$TAB"
 SPYEOF
 chmod +x "$WORKDIR/spy_supply"
@@ -244,8 +248,8 @@ assert_true "AC-88: 5回目までの経過が4×interval(=4秒)以上(検証2巡
 echo "=== AC-90: FR-72の描画射影（切り詰め・クランプ・件数一致） ==="
 # 10コードポイント超の正式名と幅に収まらないnext値・クランプなし(M-4=幅16)。
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
-  printf 'P\t1\tavatar-switch-plan-long-name\t配布方式のたたき台を書く長い説明文\t稼働中\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
+  printf 'P\t1\tavatar-switch-plan-long-name\t配布方式のたたき台を書く長い説明文\t稼働中\t\n'
   printf 'E\t1\n'
 } > "$WORKDIR/p90a.data"
 cat > "$WORKDIR/p90a" <<'EOF'
@@ -253,18 +257,18 @@ cat > "$WORKDIR/p90a" <<'EOF'
 cat "$0.data"
 EOF
 chmod +x "$WORKDIR/p90a"
-OUT6="$(CMUX_NEXT_ROWS=40 CMUX_TASK_COLS=16 run_watch "$WORKDIR/p90a" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+OUT6="$(CMUX_NEXT_ROWS=40 CMUX_NEXT_COLS=16 run_watch "$WORKDIR/p90a" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
 NAME_LINE="$(printf '%s\n' "$OUT6" | sed -n '2p')"
 assert_true "AC-90③: 正式名は10コードポイントへ切り詰められる" \
   "$(printf '%s' "$NAME_LINE" | awk '{print $2}' | python3 -c 'import sys; s=sys.stdin.readline().rstrip("\n"); print(1 if len(s)<=10 else 0)')"
 
 # クランプあり（高さ8）＝各区分の見出しの件数が全行数と一致(落ちた分だけ減らない)
 {
-  printf '#V\tcmux-dock-frame/3\tProject\n'
+  printf '#V\tcmux-dock-frame/4\tProject\n'
   for i in 1 2 3 4 5; do
-    printf 'P\t%d\tproj-%d\tnext-%d\t稼働中\n' "$i" "$i" "$i"
+    printf 'P\t%d\tproj-%d\tnext-%d\t稼働中\t\n' "$i" "$i" "$i"
   done
-  printf 'P\t6\tproj-6\tnext-6\t保留\n'
+  printf 'P\t6\tproj-6\tnext-6\t保留\t\n'
   printf 'E\t6\n'
 } > "$WORKDIR/p90b.data"
 cat > "$WORKDIR/p90b" <<'EOF'
@@ -272,7 +276,7 @@ cat > "$WORKDIR/p90b" <<'EOF'
 cat "$0.data"
 EOF
 chmod +x "$WORKDIR/p90b"
-OUT7="$(CMUX_NEXT_ROWS=8 CMUX_TASK_COLS=40 run_watch "$WORKDIR/p90b" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+OUT7="$(CMUX_NEXT_ROWS=8 CMUX_NEXT_COLS=40 run_watch "$WORKDIR/p90b" --once | sed -E $'s/\x1b\\[[0-9;]*m//g')"
 assert_true "AC-90④: 稼働中見出しの件数(5)はクランプで行が落ちても不変" \
   "$(printf '%s\n' "$OUT7" | grep -qF '稼働中 (5)' && echo 1 || echo 0)"
 assert_true "AC-90④: 保留見出しの件数(1)は不変" \
@@ -419,6 +423,360 @@ export TMPDIR="$OLD_TMPDIR"
 assert_eq "AC-116(RP): TMPDIR不在はAI環境 応答なし" "AI環境 応答なし" "$OUT_TD"
 AFTER_HOME="$(find "$HOME" -maxdepth 1 2>/dev/null | sort)"
 assert_eq "AC-116(RP): \$HOME直下の一覧が不変" "$BEFORE_HOME" "$AFTER_HOME"
+
+echo "=== v5: AC-140 描画リテラル（WU-F・WU-F0・幅40・高さ40） ==="
+strip_sgr() { sed -E $'s/\x1b\\[[0-9;]*m//g'; }
+run_once() {  # $1=supply $2=rows $3=cols → 色除去後
+  CMUX_DOCK_SUPPLY_PROJECT="$1" CMUX_NEXT_ROWS="$2" CMUX_NEXT_COLS="$3" bash "$WATCH" --once | strip_sgr
+}
+EXPECT_WU_F="$(printf '▶ 稼働中 (2)\n1 p-active 次を進める\n2 p-past 返答を反映\n\n⏸ 待ち (2)\n3 p-wait 返事待ち 9/25 10:00\n4 p-waitday 再開 9/25 00:00\n\n⏸ 保留 (1)\n5 p-paused (next未設定)\n\n外部脳 OK')"
+EXPECT_WU_F0="$(printf '▶ 稼働中 (2)\n1 p-active 次を進める\n2 p-past 返答を反映\n\n⏸ 保留 (1)\n3 p-paused (next未設定)\n\n外部脳 OK')"
+mk_stub_WU_F "$WORKDIR/wu_f"
+mk_stub_WU_F0 "$WORKDIR/wu_f0"
+mk_stub_WU_C "$WORKDIR/wu_c"
+mk_stub_WU_Fplus12 "$WORKDIR/wu_fplus12"
+mk_stub_WU_Fpast "$WORKDIR/wu_fpast"
+OUT_WU_F="$(run_once "$WORKDIR/wu_f" 40 40)"
+assert_eq "v5_ac140_literal_WU_F: 12行とリテラル一致" "$EXPECT_WU_F" "$OUT_WU_F"
+OUT_WU_F0="$(run_once "$WORKDIR/wu_f0" 40 40)"
+assert_eq "v5_ac140_literal_WU_F0: 8行とリテラル一致" "$EXPECT_WU_F0" "$OUT_WU_F0"
+assert_eq "v5_ac140_literal_WU_F0: ⏸ 待ち が0件" "0" "$(printf '%s\n' "$OUT_WU_F0" | grep -cF '⏸ 待ち' | tr -d ' ')"
+
+echo "=== v5: AC-141 待ち行の切り詰めと描画射影（幅24／26・WU-F+12） ==="
+# 全行の表示幅（lib-dock-view.sh の disp_width＝jq 範囲表）が幅以下であることも見る。
+max_disp_width() { local l m=0 w; while IFS= read -r l; do w="$(disp_width "$l")"; is_number "$w" || w=0; [ "$w" -gt "$m" ] && m="$w"; done; printf '%s' "$m"; }
+OUT_W24="$(run_once "$WORKDIR/wu_f" 40 24)"
+assert_eq "v5_ac141_wait_row_w24: 待ち行2行" "$(printf '3 p-wait 返… 9/25 10:00\n4 p-waitday … 9/25 00:00')" "$(printf '%s\n' "$OUT_W24" | sed -n '6,7p')"
+assert_true "v5_ac141_wait_row_w24: 全行の表示幅≤24" "$([ "$(printf '%s\n' "$OUT_W24" | max_disp_width)" -le 24 ] && echo 1 || echo 0)"
+OUT_W26="$(run_once "$WORKDIR/wu_f" 40 26)"
+assert_eq "v5_ac141_wait_row_w26: 待ち行2行" "$(printf '3 p-wait 返事… 9/25 10:00\n4 p-waitday 再… 9/25 00:00')" "$(printf '%s\n' "$OUT_W26" | sed -n '6,7p')"
+assert_true "v5_ac141_wait_row_w26: 全行の表示幅≤26" "$([ "$(printf '%s\n' "$OUT_W26" | max_disp_width)" -le 26 ] && echo 1 || echo 0)"
+OUT_F12="$(run_once "$WORKDIR/wu_fplus12" 40 40)"
+assert_eq "v5_ac141_nextyear_short: 2027-01-05T09:00 の短縮形は 1/5 09:00" "5 p-nextyear 年跨ぎ 1/5 09:00" "$(printf '%s\n' "$OUT_F12" | grep -F 'p-nextyear')"
+assert_eq "v5_ac141_nextyear_short: 保留は番号6" "6 p-paused (next未設定)" "$(printf '%s\n' "$OUT_F12" | grep -F 'p-paused')"
+# v5_ac141_projection: クランプなしのとき画面のエントリ行と P 行が1対1で、
+# 番号・待ち日時（固定変換）は生・名前は10cp・next は truncate_disp の期待値。
+ENTRY_LINES="$(printf '%s\n' "$OUT_F12" | grep -E '^[0-9]+ ')"
+assert_eq "v5_ac141_projection: エントリ行数=P行数(6)" "6" "$(printf '%s\n' "$ENTRY_LINES" | wc -l | tr -d ' ')"
+PROJ_FAIL=0
+# 欄の分解は split_tsv（while IFS=$'\t' read は空欄を畳む＝§29.1 の⚠️）。
+while IFS= read -r prow; do
+  split_tsv "$prow"
+  pnum="${TSV_F[1]}"; pname="${TSV_F[2]}"; pnext="${TSV_F[3]}"; pcat="${TSV_F[4]}"; pwait="${TSV_F[5]}"
+  line="$(printf '%s\n' "$ENTRY_LINES" | grep -E "^${pnum} " )"
+  name10="$(truncate_plain "$pname" 10)"
+  case "$pnext" in '') nx="(next未設定)" ;; *) nx="$pnext" ;; esac
+  if [ "$pcat" = "待ち" ]; then
+    m="${pwait:5:2}"; d="${pwait:8:2}"; m="${m#0}"; d="${d#0}"
+    expect="$pnum $name10 $nx $m/$d ${pwait:11:5}"
+  else
+    expect="$pnum $name10 $nx"
+  fi
+  [ "$line" = "$expect" ] || { PROJ_FAIL=$(( PROJ_FAIL + 1 )); echo "  射影不一致: [$expect] vs [$line]"; }
+done < <(grep '^P' "$WORKDIR/wu_fplus12.data")
+assert_eq "v5_ac141_projection: 各対の描画射影（番号・名前10cp・next・短縮形）が一致" "0" "$PROJ_FAIL"
+
+echo "=== v5: AC-142 クランプで残るもの（配分・境界を含む総当たり・要件 v5.6 の表） ==="
+# 期待表（要件 AC-142 のリテラル・1 行 1 ケース）＝ h:A集合|W集合|H集合|N
+# 集合は番号を空白区切り昇順で書く（空集合は空）。N は …他N行 の N（クランプ
+# なしは "-"）。現物の配分関数を呼んで期待を作らない（§11.4）。
+AC142_WU_C="9:1|||19
+10:1|19||18
+11:1|19|20|17
+12:1 2|19|20|16
+13:1 2 3|19|20|15
+14:1 2 3 4|19|20|14
+15:1 2 3 4 5|19|20|13
+16:1 2 3 4 5 6|19|20|12
+17:1 2 3 4 5 6 7|19|20|11
+18:1 2 3 4 5 6 7 8|19|20|10
+19:1 2 3 4 5 6 7 8 9|19|20|9
+20:1 2 3 4 5 6 7 8 9 10|19|20|8
+21:1 2 3 4 5 6 7 8 9 10 11|19|20|7
+22:1 2 3 4 5 6 7 8 9 10 11 12|19|20|6
+23:1 2 3 4 5 6 7 8 9 10 11 12 13|19|20|5
+24:1 2 3 4 5 6 7 8 9 10 11 12 13 14|19|20|4
+25:1 2 3 4 5 6 7 8 9 10 11 12 13 14 15|19|20|3
+26:1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16|19|20|2
+27:1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18|19|20|-
+28:1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18|19|20|-"
+AC142_WU_E="9:1|||19
+10:1|9||18
+11:1|9|15|17
+12:1 2|9|15|16
+13:1 2|9 10|15|15
+14:1 2|9 10|15 16|14
+15:1 2 3|9 10|15 16|13
+16:1 2 3|9 10 11|15 16|12
+17:1 2 3|9 10 11|15 16 17|11
+18:1 2 3 4|9 10 11|15 16 17|10
+19:1 2 3 4|9 10 11 12|15 16 17|9
+20:1 2 3 4|9 10 11 12|15 16 17 18|8
+21:1 2 3 4 5|9 10 11 12|15 16 17 18|7
+22:1 2 3 4 5|9 10 11 12 13|15 16 17 18|6
+23:1 2 3 4 5|9 10 11 12 13|15 16 17 18 19|5
+24:1 2 3 4 5 6|9 10 11 12 13|15 16 17 18 19|4
+25:1 2 3 4 5 6|9 10 11 12 13 14|15 16 17 18 19|3
+26:1 2 3 4 5 6|9 10 11 12 13 14|15 16 17 18 19 20|2
+27:1 2 3 4 5 6 7 8|9 10 11 12 13 14|15 16 17 18 19 20|-
+28:1 2 3 4 5 6 7 8|9 10 11 12 13 14|15 16 17 18 19 20|-"
+AC142_WU_F="9:1|||4
+10:1|3||3
+11:1|3|5|2
+12:1 2|3 4|5|-
+13:1 2|3 4|5|-"
+AC142_WU_F0="7:1|||2
+8:1 2||3|-
+9:1 2||3|-"
+
+# $1=出力(色除去後) $2=A見出し $3=W見出し(空なら待ちブロック無しを期待) $4=H見出し
+# $5=期待行 "h:A|W|H|N" $6=クランプ無し時の総行数 → 違反を echo・件数を返す
+check_dist_out() {
+  local out="$1" act_hd="$2" wait_hd="$3" hold_hd="$4" spec="$5" full_n="$6" bad=0
+  local h rest expA expW expH expN gotA="" gotW="" gotH="" cur="" l other_cnt other_n nlines last
+  h="${spec%%:*}"; rest="${spec#*:}"
+  expA="${rest%%|*}"; rest="${rest#*|}"
+  expW="${rest%%|*}"; rest="${rest#*|}"
+  expH="${rest%%|*}"; expN="${rest#*|}"
+  printf '%s\n' "$out" | grep -qxF "$act_hd" || { bad=$(( bad + 1 )); echo "    稼働中見出し無し"; }
+  printf '%s\n' "$out" | grep -qxF "$hold_hd" || { bad=$(( bad + 1 )); echo "    保留見出し無し"; }
+  if [ -n "$wait_hd" ]; then
+    printf '%s\n' "$out" | grep -qxF "$wait_hd" || { bad=$(( bad + 1 )); echo "    待ち見出し無し"; }
+  else
+    printf '%s\n' "$out" | grep -qF '⏸ 待ち' && { bad=$(( bad + 1 )); echo "    待ち0件なのに待ち見出し"; }
+  fi
+  last="$(printf '%s\n' "$out" | tail -n 1)"
+  [ "$last" = "外部脳 OK" ] || { bad=$(( bad + 1 )); echo "    最終行が外部脳 OKでない: [$last]"; }
+  # ブロック別の番号集合（見出しで区切り、出現順＝画面の順）
+  while IFS= read -r l; do
+    case "$l" in
+      '▶ 稼働中'*) cur=A ;;
+      '⏸ 待ち'*)   cur=W ;;
+      '⏸ 保留'*)   cur=H ;;
+      [0-9]*' '*)
+        case "$cur" in
+          A) gotA="${gotA:+$gotA }${l%% *}" ;;
+          W) gotW="${gotW:+$gotW }${l%% *}" ;;
+          H) gotH="${gotH:+$gotH }${l%% *}" ;;
+        esac ;;
+    esac
+  done <<EOF_LINES
+$out
+EOF_LINES
+  [ "$gotA" = "$expA" ] || { bad=$(( bad + 1 )); echo "    稼働中の番号集合: 期待[$expA] 実際[$gotA]"; }
+  [ "$gotW" = "$expW" ] || { bad=$(( bad + 1 )); echo "    待ちの番号集合: 期待[$expW] 実際[$gotW]"; }
+  [ "$gotH" = "$expH" ] || { bad=$(( bad + 1 )); echo "    保留の番号集合: 期待[$expH] 実際[$gotH]"; }
+  other_cnt="$(printf '%s\n' "$out" | grep -c '^…他' | tr -d ' ')"
+  nlines="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+  if [ "$expN" = "-" ]; then
+    [ "$other_cnt" = "0" ] || { bad=$(( bad + 1 )); echo "    クランプ無しなのに …他"; }
+    [ "$nlines" = "$full_n" ] || { bad=$(( bad + 1 )); echo "    クランプ無しの行数 $nlines ≠ $full_n"; }
+  else
+    [ "$other_cnt" = "1" ] || { bad=$(( bad + 1 )); echo "    …他 が1行でない($other_cnt)"; }
+    other_n="$(printf '%s\n' "$out" | sed -n 's/^…他\([0-9]*\)行$/\1/p')"
+    [ "$other_n" = "$expN" ] || { bad=$(( bad + 1 )); echo "    …他N の N=$other_n ≠ $expN"; }
+    # 末尾＝保留ブロックの後（外部脳の空行の直前）に1行
+    [ "$(printf '%s\n' "$out" | tail -n 3 | head -n 1)" = "…他${expN}行" ] || { bad=$(( bad + 1 )); echo "    …他 が末尾にない"; }
+    [ "$nlines" -le "$h" ] || { bad=$(( bad + 1 )); echo "    行数 $nlines > h"; }
+  fi
+  return "$bad"
+}
+# $1=supply $2=A見出し $3=W見出し $4=H見出し $5=期待表 $6=クランプ無し行数 → 違反件数
+run_dist_table() {
+  local supply="$1" act="$2" wt="$3" hd="$4" table="$5" full_n="$6" spec h out fail=0
+  while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    h="${spec%%:*}"
+    out="$(run_once "$supply" "$h" 40)"
+    check_dist_out "$out" "$act" "$wt" "$hd" "$spec" "$full_n" || { fail=$(( fail + 1 )); echo "  h=$h で違反"; }
+  done <<EOF_TABLE
+$table
+EOF_TABLE
+  printf '%s' "$fail"
+}
+mk_stub_WU_E "$WORKDIR/wu_e"
+assert_eq "v5_ac142_dist_WU_C_h9_28: 表のリテラル20件（ブロック別番号集合・N・境界26/27）" "0" \
+  "$(run_dist_table "$WORKDIR/wu_c" "▶ 稼働中 (18)" "⏸ 待ち (1)" "⏸ 保留 (1)" "$AC142_WU_C" 27)"
+assert_eq "v5_ac142_dist_WU_C_h9_28: 表は20行" "20" "$(printf '%s\n' "$AC142_WU_C" | wc -l | tr -d ' ')"
+assert_eq "v5_ac142_dist_WU_E_h9_28: 表のリテラル20件（8/6/6 の均等配分）" "0" \
+  "$(run_dist_table "$WORKDIR/wu_e" "▶ 稼働中 (8)" "⏸ 待ち (6)" "⏸ 保留 (6)" "$AC142_WU_E" 27)"
+assert_eq "v5_ac142_dist_WU_E_h9_28: 表は20行" "20" "$(printf '%s\n' "$AC142_WU_E" | wc -l | tr -d ' ')"
+out="$(run_once "$WORKDIR/wu_c" 40 40)"
+assert_eq "v5_ac142_dist_WU_C_h9_28: h=40 はクランプなし27行" "27" "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+assert_eq "v5_ac142_WU_F0_h7_9: ⑥待ち0件（表のリテラル3件・⏸ 待ち 0件・h=7で…他2行・h=8/9で8行）" "0" \
+  "$(run_dist_table "$WORKDIR/wu_f0" "▶ 稼働中 (2)" "" "⏸ 保留 (1)" "$AC142_WU_F0" 8)"
+assert_eq "v5_ac142_WU_F_h9_13: ⑦クランプ中の区分遷移（表のリテラル5件・境界12）" "0" \
+  "$(run_dist_table "$WORKDIR/wu_f" "▶ 稼働中 (2)" "⏸ 待ち (2)" "⏸ 保留 (1)" "$AC142_WU_F" 12)"
+
+echo "=== v5: AC-143 先頭行の隠れ（常駐1ティックの生バイト列・lib-tick-bytes.sh） ==="
+# $1=供給側 $2=h範囲(空白区切り) $3=先頭期待 $4=③を期待する最小h $5=名前
+run_tick_range() {
+  local supply="$1" hs="$2" first="$3" min3="$4" name="$5" h fails expect_last tfail=0
+  for h in $hs; do
+    if ! capture_first_tick "$supply" "$h" "$WORKDIR/tick_${name}_$h.log" "$WATCH"; then
+      tfail=$(( tfail + 1 )); echo "  $name h=$h: 1ティックを捕捉できない"; continue
+    fi
+    expect_last=""
+    [ "$h" -ge "$min3" ] && expect_last="外部脳 OK"
+    fails="$(tick_fails "$WORKDIR/tick_${name}_$h.log" "$h" "$first" "$expect_last")"
+    if [ -n "$fails" ]; then
+      tfail=$(( tfail + 1 )); printf '  %s h=%s:\n%s\n' "$name" "$h" "$fails"
+    fi
+  done
+  printf '%s' "$tfail"
+}
+assert_eq "v5_ac143_tick_WU_C_h4_28: h∈4..28 で①②③⑤⑥⑦" "0" \
+  "$(run_tick_range "$WORKDIR/wu_c" "4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28" "▶ 稼働中 (18)" 9 WU_C)"
+assert_eq "v5_ac143_tick_WU_E_h4_28: h∈4..28 で①②③⑤⑥⑦（8/6/6）" "0" \
+  "$(run_tick_range "$WORKDIR/wu_e" "4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28" "▶ 稼働中 (8)" 9 WU_E)"
+assert_eq "v5_ac143_tick_WU_F_h4_13: h∈4..13 で①②③⑤⑥⑦" "0" \
+  "$(run_tick_range "$WORKDIR/wu_f" "4 5 6 7 8 9 10 11 12 13" "▶ 稼働中 (2)" 9 WU_F)"
+assert_eq "v5_ac143_tick_WU_F0_h4_9: h∈4..9 で①②③⑤⑥⑦" "0" \
+  "$(run_tick_range "$WORKDIR/wu_f0" "4 5 6 7 8 9" "▶ 稼働中 (2)" 7 WU_F0)"
+# ④ WU-R＝明示指定なし・新セッション（制御端末なし＝stty size 取得不能）で
+# h_def=4 に対して①②⑤⑥⑦（LF≤3）。
+(
+  unset CMUX_NEXT_ROWS
+  capture_first_tick "$WORKDIR/wu_c" "" "$WORKDIR/tick_WU_R.log" "$WATCH" setsid
+) || echo "  WU-R: 1ティックを捕捉できない"
+WUR_FAILS="$(tick_fails "$WORKDIR/tick_WU_R.log" 4 "▶ 稼働中 (18)" "")"
+[ -n "$WUR_FAILS" ] && printf '%s\n' "$WUR_FAILS"
+assert_eq "v5_ac143_WU_R_hdef4: 行数取得不能の起動で h_def=4（LF≤3・先頭 ▶ 稼働中 (18)）" "" "$WUR_FAILS"
+
+echo "=== v5: AC-146④ 描画側は時刻で区分を変えない（WU-F-past） ==="
+OUT_PAST="$(run_once "$WORKDIR/wu_fpast" 40 40)"
+assert_true "v5_ac146_render_ignores_time_WU_Fpast: 過去の待ち日時でも ⏸ 待ち (2) ブロックに残る" \
+  "$(printf '%s\n' "$OUT_PAST" | grep -qxF '⏸ 待ち (2)' && echo 1 || echo 0)"
+assert_eq "v5_ac146_render_ignores_time_WU_Fpast: 行は 1/1 00:00 付き" "3 p-wait 返事待ち 1/1 00:00" \
+  "$(printf '%s\n' "$OUT_PAST" | grep -E '^3 ')"
+assert_eq "v5_ac146_render_ignores_time_WU_Fpast: 稼働中は(2)のまま" "▶ 稼働中 (2)" "$(printf '%s\n' "$OUT_PAST" | sed -n '1p')"
+
+echo "=== v5: AC-147 文書の追随（README・ソース冒頭の表示例） ==="
+README_NEXT="$SCRIPT_DIR/../README.md"
+README_TASK="$CMUX_DIR/cmux-task-watch/README.md"
+for w in '待ち' 'cmux-dock-frame/4' 'wait_until'; do
+  assert_true "v5_ac147_readme_next_watch: README に $w が1件以上" "$(grep -qF "$w" "$README_NEXT" && echo 1 || echo 0)"
+done
+assert_eq "v5_ac147_readme_next_watch: README に旧版リテラルが0件" "0" "$(grep -cF "$(printf 'cmux-dock-frame/%s' 3)" "$README_NEXT" | tr -d ' ')"
+assert_true "v5_ac147_readme_task_watch_L63: 版ちがい行の Project 側の版が /4" \
+  "$(grep -F '版ちがい' "$README_TASK" | grep -qF 'cmux-dock-frame/4' && echo 1 || echo 0)"
+assert_eq "v5_ac147_readme_task_watch_L63: 版ちがい行に旧版リテラルが0件" "0" \
+  "$(grep -F '版ちがい' "$README_TASK" | grep -cF "$(printf 'cmux-dock-frame/%s' 3)" | tr -d ' ')"
+# ソース冒頭（最初の非コメント行より前）の表示例に待ちブロックがある。
+HEADER="$(awk '/^[^#]/{exit} {print}' "$WATCH")"
+assert_true "v5_ac147_source_header_wait_block: ソース冒頭の表示例に ⏸ 待ち がある" \
+  "$(printf '%s\n' "$HEADER" | grep -qF '⏸ 待ち' && echo 1 || echo 0)"
+
+echo "=== v5: DT-18 B行0行の固定行（WU-F 派生・h=9） ==="
+mk_stub_WU_F_noB "$WORKDIR/wu_f_nob"
+OUT_NOB="$(run_once "$WORKDIR/wu_f_nob" 9 40)"
+assert_eq "DT-18: 9行" "9" "$(printf '%s\n' "$OUT_NOB" | wc -l | tr -d ' ')"
+assert_eq "DT-18: …他2行 が1行" "1" "$(printf '%s\n' "$OUT_NOB" | grep -cxF '…他2行' | tr -d ' ')"
+# v5.6: …他N行 は末尾（保留ブロックの後）に置く（FR-100 ③）ので B行0行では
+# 最終行が …他2行・その直前が保留のエントリ行（末尾に空行が無い）。
+assert_eq "DT-18: 最終行が …他2行（末尾に空行が無い）" "…他2行" "$(printf '%s\n' "$OUT_NOB" | tail -n 1)"
+assert_eq "DT-18: エントリ行は3行(R=3→1/1/1)" "3" "$(printf '%s\n' "$OUT_NOB" | grep -cE '^[0-9]+ ' | tr -d ' ')"
+assert_eq "DT-18: 残る番号は 1・3・5（各ブロック先頭）" "1 3 5" "$(printf '%s\n' "$OUT_NOB" | grep -E '^[0-9]+ ' | cut -d' ' -f1 | tr '\n' ' ' | sed 's/ $//')"
+OUT_NOB10="$(run_once "$WORKDIR/wu_f_nob" 10 40)"
+assert_eq "DT-18: h=10 はクランプなし10行" "10" "$(printf '%s\n' "$OUT_NOB10" | wc -l | tr -d ' ')"
+assert_eq "DT-18: h=10 に …他 が無い" "0" "$(printf '%s\n' "$OUT_NOB10" | grep -c '^…他' | tr -d ' ')"
+
+echo "=== v5: DT-19 幅の上書き口 CMUX_NEXT_COLS=16 ==="
+OUT_W16="$(run_once "$WORKDIR/p90a" 40 16)"
+NAME16="$(printf '%s\n' "$OUT_W16" | sed -n '2p' | awk '{print $2}')"
+assert_eq "DT-19: 名前欄は10cp" "10" "$(printf '%s' "$NAME16" | python3 -c 'import sys; print(len(sys.stdin.read()))')"
+assert_true "DT-19: 全行の表示幅≤16" "$([ "$(printf '%s\n' "$OUT_W16" | max_disp_width)" -le 16 ] && echo 1 || echo 0)"
+assert_true "DT-19: 幅16で next が切り詰められ末尾が …" "$(printf '%s\n' "$OUT_W16" | sed -n '2p' | grep -q '…$' && echo 1 || echo 0)"
+
+echo "=== v5: DT-20 版ちがいからの回復（同一常駐で旧版→/4） ==="
+mk_stub_WU_Z "$WORKDIR/wuz_g" g
+STATE_LINK20="$WORKDIR/state20"
+ln -sf "$WORKDIR/wuz_g" "$STATE_LINK20"
+LOG20="$WORKDIR/dt20.log"
+CMUX_DOCK_SUPPLY_PROJECT="$STATE_LINK20" CMUX_NEXT_INTERVAL=1 CMUX_NEXT_ROWS=40 CMUX_NEXT_COLS=40 \
+  bash "$WATCH" >"$LOG20" 2>/dev/null &
+DPID20=$!
+last_block() {  # $1=log → 最終描画ブロック（ESC[H〜ESC[J・色除去）
+  python3 - "$1" <<'PYEOF'
+import re, sys
+data = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+blocks = re.findall(r"\x1b\[H(.*?)\x1b\[J", data, re.S)
+last = blocks[-1] if blocks else ""
+last = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", last).replace("\r", "")
+print(last.rstrip("\n"))
+PYEOF
+}
+w=0; while [ "$w" -lt 100 ] && [ "$(esc_count "$LOG20" "$ESC2026L")" -lt 1 ]; do sleep 0.1; w=$(( w + 1 )); done
+assert_eq "DT-20①: 旧版の供給側では最終ブロックが AI環境 版ちがい" "AI環境 版ちがい" "$(last_block "$LOG20")"
+N20_BEFORE="$(esc_count "$LOG20" "$ESC2026L")"
+ln -sf "$WORKDIR/wu_f" "$STATE_LINK20"
+w=0; while [ "$w" -lt 100 ] && [ "$(esc_count "$LOG20" "$ESC2026L")" -le "$N20_BEFORE" ]; do sleep 0.1; w=$(( w + 1 )); done
+sleep 0.2
+LAST20="$(last_block "$LOG20")"
+assert_eq "DT-20③: /4 へ切り替えた次のティックで通常表示（AC-140 の12行）" "$EXPECT_WU_F" "$LAST20"
+assert_true "DT-20③: 版ちがい を含まない" "$(printf '%s\n' "$LAST20" | grep -qF '版ちがい' && echo 0 || echo 1)"
+assert_eq "DT-20③: 常駐 PID が生存" "1" "$(kill -0 "$DPID20" 2>/dev/null && echo 1 || echo 0)"
+kill -TERM "$DPID20" 2>/dev/null; wait_pid_bounded "$DPID20" 50
+
+echo "=== v5: DT-21 待ち行の配色（SGR 列の比較・色除去前） ==="
+mk_stub_WU_F_holdnext "$WORKDIR/wu_f_holdnext"
+sgr_seq() {  # stdin=1行（色付き）→ SGR 列を空白区切りで
+  python3 -c 'import re,sys; s=sys.stdin.read(); print(" ".join(m[1:] for m in re.findall(r"\x1b\[[0-9;]*m", s)))'
+}
+RAW21="$(CMUX_DOCK_SUPPLY_PROJECT="$WORKDIR/wu_f_holdnext" CMUX_NEXT_ROWS=40 CMUX_NEXT_COLS=40 bash "$WATCH" --once)"
+WAIT_SGR="$(printf '%s\n' "$RAW21" | grep -F "p-wait$(printf '\033')" | sgr_seq)"
+HOLD_SGR="$(printf '%s\n' "$RAW21" | grep -F 'p-paused' | sgr_seq)"
+assert_eq "DT-21: 保留行(nextあり)の SGR 列＝DIM RESET LBL RESET LBL RESET" \
+  "[38;5;244m [0m [38;5;252m [0m [38;5;252m [0m" "$HOLD_SGR"
+assert_eq "DT-21: 待ち行の SGR 列＝保留行の列＋末尾に DIM RESET の1組" \
+  "$HOLD_SGR [38;5;244m [0m" "$WAIT_SGR"
+assert_eq "DT-21: 待ち行の短縮形は DIM で描かれる" "1" \
+  "$(printf '%s\n' "$RAW21" | grep -F "p-wait$(printf '\033')" | grep -cF "$(printf '\033')[38;5;244m9/25 10:00$(printf '\033')[0m" | tr -d ' ')"
+
+echo "=== v5: DT-22 配分関数の性質（distribute_rows・純関数・source ガード A-v5-4） ==="
+# cmux-next-watch.sh を source して直接呼ぶ（末尾の source ガードで main は走らない）。
+# 固定表＝本人の3例＋WU-C＋稼働中0件＋2巡以上の回し＋R=0（期待値は手計算）。
+DT22_TABLE="10 8 6 6:4 3 3
+10 5 1 4:5 1 4
+12 8 0 6:6 0 6
+10 18 1 1:8 1 1
+5 0 3 9:0 3 2
+9 1 1 20:1 1 7
+0 8 6 6:0 0 0"
+DT22_OUT="$(
+  . "$WATCH"
+  fail=0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    args="${row%%:*}"; expect="${row#*:}"
+    # shellcheck disable=SC2086
+    got="$(distribute_rows $args)"
+    [ "$got" = "$expect" ] || { fail=$(( fail + 1 )); echo "  distribute_rows $args: 期待[$expect] 実際[$got]"; }
+  done <<EOF_DT22
+$DT22_TABLE
+EOF_DT22
+  # 性質＝0≤n_b≤6・0≤R<n の全組合せで Σk=R・k_b≤n_b
+  prop=0
+  for nA in 0 1 2 3 4 5 6; do for nW in 0 1 2 3 4 5 6; do for nH in 0 1 2 3 4 5 6; do
+    n=$(( nA + nW + nH ))
+    R=0
+    while [ "$R" -lt "$n" ]; do
+      set -- $(distribute_rows "$R" "$nA" "$nW" "$nH")
+      if [ $(( $1 + $2 + $3 )) -ne "$R" ] || [ "$1" -gt "$nA" ] || [ "$2" -gt "$nW" ] || [ "$3" -gt "$nH" ] \
+         || [ "$1" -lt 0 ] || [ "$2" -lt 0 ] || [ "$3" -lt 0 ]; then
+        prop=$(( prop + 1 )); echo "  性質違反: R=$R n=$nA/$nW/$nH → $1/$2/$3"
+      fi
+      R=$(( R + 1 ))
+    done
+  done; done; done
+  echo "FIXED_FAIL=$fail"
+  echo "PROP_FAIL=$prop"
+)"
+assert_eq "DT-22: 固定表7行の出力が一致" "FIXED_FAIL=0" "$(printf '%s\n' "$DT22_OUT" | grep '^FIXED_FAIL=')"
+assert_eq "DT-22: 0≤n_b≤6・0≤R<n の全組合せで Σk=R かつ k_b≤n_b" "PROP_FAIL=0" "$(printf '%s\n' "$DT22_OUT" | grep '^PROP_FAIL=')"
+printf '%s\n' "$DT22_OUT" | grep -v '^FIXED_FAIL=\|^PROP_FAIL=' | head -20
+assert_true "DT-22: source しても main は走らない（ソース末尾の source ガード）" \
+  "$(tail -n 5 "$WATCH" | grep -q 'BASH_SOURCE' && echo 1 || echo 0)"
 
 echo "=== --list 拒否（F-56） ==="
 OUT8="$(bash "$WATCH" --list 2>&1)"; RC8=$?

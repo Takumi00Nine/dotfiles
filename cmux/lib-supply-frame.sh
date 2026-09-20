@@ -20,13 +20,16 @@
 
 # 契約の版は種別ごとに独立させる（設計 v4 §39.3 D-v4-1）。Task は行文法を
 # 非互換で上げ（H/X廃止・V/C/D新設）cmux-dock-frame/2。Project は
-# health-self-explain 設計 v1.2 §6（D-3）で cmux-dock-frame/3 へ非互換に
-# 上げた＝B行の種別を「外部脳」1種に統一し、warn値へ`error`を追加、B行を
-# 高々1行に変更（旧`棚卸し`/`週次`2種・`warn|ok`2値・最大2行は廃止）。
+# health-self-explain 設計 v1.2 §6（D-3）で B行の種別を「外部脳」1種に
+# 統一し、warn値へ`error`を追加、B行を高々1行に変更（旧`棚卸し`/`週次`
+# 2種・`warn|ok`2値・最大2行は廃止）した版を経て、v5（設計 §40.4）で
+# cmux-dock-frame/4 へ非互換に上げた＝P行に待ち日時の欄（第6欄）を足し、
+# 区分を 稼働中／待ち／保留 の3値、並びを区分の順位の非減少、待ち日時の
+# 欄間規則（待ちの行だけ非空で YYYY-MM-DDTHH:MM 形）を追加。
 # validate_frame が種別からこの2定数を引き、awkへ -v expect_ver=… として
 # 渡す（L290付近の旧リテラル比較を置換）。
 CMUX_FRAME_VERSION_TASK="cmux-dock-frame/2"
-CMUX_FRAME_VERSION_PROJECT="cmux-dock-frame/3"
+CMUX_FRAME_VERSION_PROJECT="cmux-dock-frame/4"
 
 # is_number の複製（複製元: cmux/lib-dock-view.sh の is_number）。この
 # ファイルは「LIB_DIR/lib-dock-view.sh を先に source 済み」という暗黙の
@@ -397,10 +400,19 @@ END {
     pos = 2
     while (pos < eidx && fld[pos, 1] == "P") {
       pn++
-      if (raw_nf[pos] != 5) exit 3
+      # cmux-dock-frame/4（v5 §40.4）＝P行は6欄（番号・正式名・next・区分・
+      # 待ち日時）。区分は3値。待ち日時の欄間規則は形（YYYY-MM-DDTHH:MM）
+      # までで、暦の妥当性は供給側の責務（描画側は date を呼ばない＝D-v5-8）。
+      if (raw_nf[pos] != 6) exit 3
       pnum[pn] = fld[pos,2]; pname[pn] = fld[pos,3]; pnext[pn] = fld[pos,4]; pcat[pn] = fld[pos,5]
+      pwait[pn] = fld[pos,6]
       if (pnum[pn] == "" || pname[pn] == "" || pcat[pn] == "") exit 3
-      if (pcat[pn] != "稼働中" && pcat[pn] != "保留") exit 3
+      if (pcat[pn] != "稼働中" && pcat[pn] != "待ち" && pcat[pn] != "保留") exit 3
+      if (pcat[pn] == "待ち") {
+        if (pwait[pn] !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]$/) exit 3
+      } else {
+        if (pwait[pn] != "") exit 3
+      }
       if (!is_uint(pnum[pn])) exit 3
       nval = pnum[pn] + 0
       if (nval < 1 || nval > 9999) exit 3
@@ -413,7 +425,7 @@ END {
       if (raw_nf[pos] != 4) exit 3
       bkind[bn] = fld[pos,2]; bwarn[bn] = fld[pos,3]; btext[bn] = fld[pos,4]
       if (bkind[bn] == "" || bwarn[bn] == "" || btext[bn] == "") exit 3
-      # cmux-dock-frame/3（health-self-explain 設計 v1.2 §6・D-3）＝B行の
+      # health-self-explain 設計 v1.2 §6・D-3（/4 でも不変）＝B行の
       # 種別は「外部脳」1種のみ、warn値は ok/warn/error の3値、B行は高々1行。
       if (bkind[bn] != "外部脳") exit 3
       if (bwarn[bn] != "warn" && bwarn[bn] != "ok" && bwarn[bn] != "error") exit 3
@@ -421,10 +433,12 @@ END {
     }
     if (pos != eidx) exit 3
 
-    seen_hold = 0
+    # 区分の順位（稼働中1・待ち2・保留3）が記載順に非減少（#12-B Project ②）。
+    last_rank = 0
     for (k = 1; k <= pn; k++) {
-      if (pcat[k] == "保留") seen_hold = 1
-      else if (seen_hold) exit 3
+      rank = (pcat[k] == "稼働中") ? 1 : ((pcat[k] == "待ち") ? 2 : 3)
+      if (rank < last_rank) exit 3
+      last_rank = rank
     }
     if (bn > 1) exit 3
   }

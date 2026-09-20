@@ -60,7 +60,7 @@ cmux Dock の4枠目「Task」に、供給側（ai-env の `cmux-task-model.sh`�
 |---|---|
 | `AI環境 未導入` | 供給側の呼び出し口が無い・実行不可 |
 | `AI環境 応答なし` | 供給側が非0終了・無応答・契約違反のフレームを返す |
-| `AI環境 版ちがい` | 供給側の契約の版が `cmux-dock-frame/2`（Task）でない。`CMUX_DOCK_SUPPLY_TASK` が誤って Project 供給側（`cmux-next-model.sh`・`cmux-dock-frame/3`）を指す設定も、この行に見える（供給側を更新しても直らない＝設定を戻すこと） |
+| `AI環境 版ちがい` | 供給側の契約の版が `cmux-dock-frame/2`（Task）でない。`CMUX_DOCK_SUPPLY_TASK` が誤って Project 供給側（`cmux-next-model.sh`・`cmux-dock-frame/4`）を指す設定も、この行に見える（供給側を更新しても直らない＝設定を戻すこと） |
 
 供給側が返した宣言・Vault 由来の理由（`未宣言`・`ノート不在`等）は、
 受け取った文字列をそのまま描く。
