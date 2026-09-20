@@ -3,10 +3,12 @@
 # 書き出す。描画側のテストは CMUX_DOCK_SUPPLY_TASK／CMUX_DOCK_SUPPLY_PROJECT
 # でそれを指す。テストから `. lib-supply-stubs.sh` して使う（関数定義のみ・
 # 副作用なし）。
+# 前提＝`. cmux/lib-supply-frame.sh` を先に source（`CMUX_FRAME_VERSION_PROJECT` を参照する）。
 #
 # 契約はフレーム（TSV・§29.2）だけを知る。ドメインデータは一切知らない。
 
 TAB="$(printf '\t')"
+: "${CMUX_FRAME_VERSION_PROJECT:?lib-supply-frame.sh を先に source すること}"
 
 # --- 正準フレーム（P-6′・v4 §39.3の入力） -----------------------------------
 
