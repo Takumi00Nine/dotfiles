@@ -11,6 +11,11 @@
   "automation" : {
     "claudeCodeIntegration" : true,
     "suppressSubagentNotifications" : true,
+    // workspaceAutoNaming: cmux 標準の AI 自動命名（2026-09-21 本人指示で ON）。
+    // ターン終了ごとに冒頭 user 2件＋末尾 4件の抜粋を Haiku へ渡して 2〜5 語の題を付け直す
+    // （180秒・6行以上増加のときだけ）。手動 /rename すると以後の自動命名は止まる。
+    // 経緯: Vault Projects/cmux-improvements ⑤・Knowledge/cmux-cli-reference 命名機構節
+    "workspaceAutoNaming" : true,
     // socketControlMode: 既定 cmuxOnly は「cmux 内で起動されたプロセスのみ接続可」で、
     // launchd 起動の cmux-dock-guard がソケットに接続できない（2026-08-08 実測）。
     // ソケット自体が 0600（同一ユーザー限定）なので automation 開放のリスク増分は小さい。
