@@ -808,6 +808,24 @@ mk_stub_WU_F_holdnext() {  # $1=パス
   _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${_WU_F_LINES[@]}" | _write_frame_stub "$1"
 }
 
+# --- WW-1／WW-2（v6・要件 requirements-v6.md §7・AC-152・設計 §41.9.3） ------
+# 幅の検査用＝待ち 1 行（名前 10 コードポイント・next 20 セル）＋B 行だけ。
+# WW-1＝短縮形 10 セル（9/21 06:00）／WW-2＝短縮形の最大長 11 セル（12/31 23:59）。
+mk_stub_WW_1() {  # $1=パス
+  local l=(
+    "$(_p_row 7 roles-conf 職種を設定だけで縛る 待ち 2026-09-21T06:00)"
+    "$(_b_ok_row)"
+  )
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${l[@]}" | _write_frame_stub "$1"
+}
+mk_stub_WW_2() {  # $1=パス
+  local l=(
+    "$(_p_row 8 roles-conf 職種を設定だけで縛る 待ち 2026-12-31T23:59)"
+    "$(_b_ok_row)"
+  )
+  _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${l[@]}" | _write_frame_stub "$1"
+}
+
 # WU-Z＝描画側の陰性スタブ群（AC-139）。$1=パス $2=サブID(a..h)。
 # (a)〜(f)(h)＝契約違反（rc=3・応答なし）／(g)＝版ちがい（rc=2）。
 WU_Z_IDS=(a b c d e f g h)

@@ -19,6 +19,18 @@ set -uo pipefail
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TESTS_DIR/.." && pwd)"
 DOTFILES_DIR="${DOTFILES_DIR:-$REPO_ROOT}"
+# 環境変数前置（"NAME=値 ..."）の剥がしは cmux-dock-guard.sh の strip_env_prefix
+# が正本（v6 FR-115・設計 §41.3.4 案A）。ここで自前の規則を持たず、guardを
+# sourceして同じ関数を使う（guardは直接実行時だけmainを走らせるsourceガード
+# 済み。sourceは DOCK_JSON 等の変数を上書きするので、このテスト自身の変数を
+# 定義する前に行う）。
+GUARD_SCRIPT="$DOTFILES_DIR/cmux/cmux-dock-guard/cmux-dock-guard.sh"
+# shellcheck source=../cmux/cmux-dock-guard/cmux-dock-guard.sh
+. "$GUARD_SCRIPT"
+if ! command -v strip_env_prefix >/dev/null 2>&1; then
+  echo "NG - cmux-dock-guard.sh に strip_env_prefix が無い ($GUARD_SCRIPT)"
+  exit 1
+fi
 # 既定はREPO_ROOT（このテスト自身のcheckout）配下のdock.json/スクリプトを読む。
 # 実HOME本体（$HOME/work/dotfiles）を明示的に見たいときだけDOTFILES_DIRを渡す。
 DOCK_JSON="$DOTFILES_DIR/cmux/dock.json"
@@ -31,31 +43,6 @@ fail_case() { FAIL=$((FAIL + 1)); echo "  NG - $1"; }
 assert_true() {
   local desc="$1" cond="$2"
   if [ "$cond" = "1" ]; then pass "$desc"; else fail_case "$desc"; fi
-}
-
-# strip_env_prefix: command文字列の先頭に付く0個以上の "NAME=値" 環境変数接頭辞
-# (POSIXの識別子規則 [A-Za-z_][A-Za-z0-9_]*=、値に空白は想定しない)を読み飛ばし、
-# 実行ファイル本体以降をstdoutへ返す(例: "CMUX_DOCK_MAX_COLS=35 .../cmux-task-watch.sh"
-# -> ".../cmux-task-watch.sh")。接頭辞と本体の間が連続空白・TABでも、剥がした
-# 直後に残る先頭の空白類を落としてから次のトークン判定へ進む。
-strip_env_prefix() {
-  local cmd="$1" first_token name leading
-  while :; do
-    first_token="${cmd%% *}"
-    case "$first_token" in
-      *=*)
-        name="${first_token%%=*}"
-        if [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && [ "$first_token" != "$cmd" ]; then
-          cmd="${cmd#* }"
-          leading="${cmd%%[![:space:]]*}"
-          [ -n "$leading" ] && cmd="${cmd#"$leading"}"
-          continue
-        fi
-        ;;
-    esac
-    break
-  done
-  printf '%s' "$cmd"
 }
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -81,6 +68,8 @@ echo "=== (a) dock.jsonの全controlのcommand(\$HOME展開後)が実在し実�
     "$([ "$(strip_env_prefix '1A=1 cmd')" = '1A=1 cmd' ] && echo 1 || echo 0)"
   assert_true "strip_env_prefix: 接頭辞の後ろが連続空白(2個)でも先頭空白を落として実行ファイルだけ残す" \
     "$([ "$(strip_env_prefix 'A=1  $HOME/work/dotfiles/x')" = '$HOME/work/dotfiles/x' ] && echo 1 || echo 0)"
+  assert_true "strip_env_prefix: 接頭辞と本体の間がTABでも実行ファイルだけ残す" \
+    "$([ "$(strip_env_prefix "$(printf 'A=1\t$HOME/work/dotfiles/x')")" = '$HOME/work/dotfiles/x' ] && echo 1 || echo 0)"
 
   ids="$(jq -r '.controls[].id' "$DOCK_JSON" 2>/dev/null)"
   while IFS= read -r id; do
@@ -106,6 +95,12 @@ echo "=== (a) dock.jsonの全controlのcommand(\$HOME展開後)が実在し実�
     if [ "$id" = "task" ]; then
       assert_true "control[task]のcommand先頭の環境変数接頭辞(例:CMUX_DOCK_MAX_COLS=35)を剥がした後の実行ファイルがcmux-task-watch.shの実パスと一致 ($resolved)" \
         "$([ "$resolved" = "$DOTFILES_DIR/cmux/cmux-task-watch/cmux-task-watch.sh" ] && echo 1 || echo 0)"
+    fi
+    # Project枠（id=next）。v6 S6-2 で幅の上限の前置（Task枠と同じ形）を置く
+    # 予定だが、前置は必須にしない（設計 DT-32＝配置前後の両方で通る）。
+    if [ "$id" = "next" ]; then
+      assert_true "control[next]のcommand先頭の環境変数接頭辞(あれば)を剥がした後の実行ファイルがcmux-next-watch.shの実パスと一致 ($resolved)" \
+        "$([ "$resolved" = "$DOTFILES_DIR/cmux/cmux-next-watch/cmux-next-watch.sh" ] && echo 1 || echo 0)"
     fi
   done <<< "$ids"
 }

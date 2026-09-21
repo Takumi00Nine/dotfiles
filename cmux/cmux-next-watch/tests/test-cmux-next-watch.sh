@@ -778,6 +778,53 @@ printf '%s\n' "$DT22_OUT" | grep -v '^FIXED_FAIL=\|^PROP_FAIL=' | head -20
 assert_true "DT-22: source しても main は走らない（ソース末尾の source ガード）" \
   "$(tail -n 5 "$WATCH" | grep -q 'BASH_SOURCE' && echo 1 || echo 0)"
 
+echo "=== v6: AC-152 待ち行の切り詰めと短縮形の全セル（WW-1・WW-2・幅37／36／35・高さ40） ==="
+# 要件 requirements-v6.md §8 AC-152（計算根拠＝requirements-v6-notes.md §8）。
+# 幅は明示の上書き口 CMUX_NEXT_COLS で与える（上書き値は上限の対象外＝要件 §11）。
+mk_stub_WW_1 "$WORKDIR/ww_1"
+mk_stub_WW_2 "$WORKDIR/ww_2"
+# $1=AC名 $2=supply $3=幅 $4=番号 $5=期待行 $6=期待表示幅 $7=短縮形の末尾
+ac152_case() {
+  local name="$1" out line
+  out="$(run_once "$2" 40 "$3")"
+  line="$(printf '%s\n' "$out" | grep -E "^$4 ")"
+  assert_eq "$name: 待ち行がリテラル一致" "$5" "$line"
+  assert_eq "$name: 待ち行の表示幅=$6" "$6" "$(disp_width "$line")"
+  assert_true "$name: 短縮形の全文字（末尾 $7）を含む" "$(printf '%s\n' "$line" | grep -q " $7\$" && echo 1 || echo 0)"
+  assert_true "$name: 全行の表示幅≤$3" "$([ "$(printf '%s\n' "$out" | max_disp_width)" -le "$3" ] && echo 1 || echo 0)"
+}
+ac152_case "v6_ac152_WW1_w37" "$WORKDIR/ww_1" 37 7 "7 roles-conf 職種を設定だ… 9/21 06:00" 37 "9/21 06:00"
+ac152_case "v6_ac152_WW1_w36" "$WORKDIR/ww_1" 36 7 "7 roles-conf 職種を設定… 9/21 06:00" 35 "9/21 06:00"
+ac152_case "v6_ac152_WW2_w37" "$WORKDIR/ww_2" 37 8 "8 roles-conf 職種を設定… 12/31 23:59" 36 "12/31 23:59"
+ac152_case "v6_ac152_WW2_w35" "$WORKDIR/ww_2" 35 8 "8 roles-conf 職種を設… 12/31 23:59" 34 "12/31 23:59"
+# 幅の上限の規則（FR-110）＝Project 常駐が使う幅は min(端末取得, 上限)。
+# 端末取得は lib-dock-view.sh の差し替え口 _stty_cols（既存検査と同じ口）で 37 を
+# 与え、常駐を source（source ガード・DT-22 と同じ）して cols_now を直接呼ぶ。
+# 明示の上書き（CMUX_NEXT_COLS=37）は上限の対象外。
+COLS_MIN="$(
+  unset CMUX_NEXT_COLS
+  . "$WATCH"
+  _stty_cols() { printf '37'; }
+  CMUX_DOCK_MAX_COLS=36 cols_now
+)"
+assert_eq "v6_ac152_min_rule: 端末取得37・上限36 → Project 常駐の描画幅36" "36" "$COLS_MIN"
+COLS_OVR="$(
+  export CMUX_NEXT_COLS=37
+  . "$WATCH"
+  _stty_cols() { printf '37'; }
+  CMUX_DOCK_MAX_COLS=36 cols_now
+)"
+assert_eq "v6_ac152_min_rule: 明示の上書き37は上限36の対象外 → 37" "37" "$COLS_OVR"
+
+echo "=== v6: AC-154(b) 文書の追随（README の待ちの項に「▶ の版」） ==="
+# 要件 §9「文書」＝cmux/cmux-next-watch/README.md の wait_until の説明の直後に「▶ の版」。
+assert_true "v6_ac154b_readme_next_watch: README に ▶ の版 が1件以上" \
+  "$(grep -qF '▶ の版' "$README_NEXT" && echo 1 || echo 0)"
+WAIT_LN="$(grep -nF 'wait_until' "$README_NEXT" | head -n 1 | cut -d: -f1)"
+VER_LN="$(grep -nF '▶ の版' "$README_NEXT" | head -n 1 | cut -d: -f1)"
+assert_true "v6_ac154b_readme_next_watch: ▶ の版 が wait_until の説明より後にある" \
+  "$([ -n "$WAIT_LN" ] && [ -n "$VER_LN" ] && [ "$VER_LN" -gt "$WAIT_LN" ] && echo 1 || echo 0)"
+
 echo "=== --list 拒否（F-56） ==="
 OUT8="$(bash "$WATCH" --list 2>&1)"; RC8=$?
 assert_eq "--list は既知だが提供しない引数としてrc=1" "1" "$RC8"

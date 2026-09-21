@@ -168,8 +168,40 @@ observed_global_titles() {
     | jq -r '.. | objects | select(.dock_scope? == "global" and (.title? != null)) | .title' 2>/dev/null
 }
 
+# strip_env_prefix: command文字列の先頭に付く0個以上の環境変数前置
+# （`KEY=VALUE` 形のトークン。KEY=[A-Za-z_][A-Za-z0-9_]*・VALUEは空白を
+# 含まない・空可。区切りは空白・TABの連続）を読み飛ばし、実行ファイル本体
+# 以降をstdoutへ返す（v6 FR-115・要件 §2）。値は使わず、evalもしない。
+# 文法に合わない先頭トークン（例: `1A=1`）は前置でないので剥がさない。
+# `K="a b" <実体>` は `K="a` を前置として剥がし、残り `b" <実体>` を返す
+# （先頭 `b"` は実行ファイルでないので、呼び出し側で判定外になる）。
+# 前置だけで本体が無い文字列はそのまま返す。
+# 前置の文法の正本はこの関数（tests/test-cmux-dock-json.sh はこの
+# スクリプトをsourceして同じ剥がしを使う＝規則を2か所に書かない）。
+strip_env_prefix() {
+  local cmd="$1" tok name
+  while :; do
+    cmd="${cmd#"${cmd%%[![:blank:]]*}"}"
+    tok="${cmd%%[[:blank:]]*}"
+    case "$tok" in
+      *=*) ;;
+      *) break ;;
+    esac
+    name="${tok%%=*}"
+    case "$name" in
+      ''|[0-9]*|*[!A-Za-z0-9_]*) break ;;
+    esac
+    [ "$tok" = "$cmd" ] && break
+    cmd="${cmd#"$tok"}"
+  done
+  printf '%s' "$cmd"
+}
+
 # expected_process_patterns: dock.json の各terminal controlのcommandから、
-# 先頭トークン（実行ファイルパス）のbasenameを1行ずつ返す。$HOMEだけ安全に
+# 環境変数前置（strip_env_prefix）を読み飛ばした後の先頭トークン（実行
+# ファイルパス）のbasenameを1行ずつ返す。前置つきの枠も前置の無い枠と同じ
+# 生存判定の対象になる（v6 FR-115＝Task枠 `CMUX_DOCK_MAX_COLS=35 …` が
+# v5では判定外に落ちていた F-95 の解消）。$HOMEだけ安全に
 # 展開する（evalはしない＝任意コマンド実行を避ける。展開はbasename抽出だけ
 # なら不要そうに見えるが、直後の実行ファイル存在チェックにはフルパスが要る
 # ので実際には必須）。実行ファイルが存在しない（`[ -x ]`で見えない）
@@ -183,6 +215,7 @@ expected_process_patterns() {
   jq -r '.controls[]? | select((.type // "terminal") == "terminal") | .command // empty' "$DOCK_JSON" 2>/dev/null \
     | while IFS= read -r cmdline; do
         [ -z "$cmdline" ] && continue
+        cmdline="$(strip_env_prefix "$cmdline")"
         expanded="${cmdline//\$HOME/$HOME}"
         expanded="${expanded//\${HOME\}/$HOME}"
         first="${expanded%% *}"

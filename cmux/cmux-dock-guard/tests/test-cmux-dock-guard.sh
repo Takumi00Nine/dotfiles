@@ -585,6 +585,135 @@ echo "=== (m) 実行ファイルが存在しないcontrolはプロセス判定�
     "$(grep -q '1回目判定で健全' "$STATE_DIR/guard.log" && echo 1 || echo 0)"
 }
 
+echo "=== (n) v6 AC-155: 環境変数前置つきの枠も生存判定の対象（WG-1・FR-115） ==="
+# 要件 requirements-v6.md §7 WG-1・§8 AC-155／設計 design.md §41.7・§41.9。
+# 実装への契約（source 後に直接呼ぶ関数名・口）:
+#   expected_process_patterns … 判定対象の実行ファイルの basename を 1 行 1 件
+#   dock_processes_alive       … 健全=戻り値 0／劣化=非 0
+#   CMUX_DOCK_GUARD_DOCK_JSON  … dock.json の差し替え口（command 内の $HOME は展開）
+# 生存の模擬＝既存の偽 pgrep（alive_patterns の basename 一覧・設計 M-v6-14）に
+# 一本化し、実プロセスは起こさない。偽スクリプト a/b/c/e/f は実行可の存在判定の
+# ためだけに置く（起動しない・missing は置かない）。
+make_wg1() {  # $1=隔離HOME $2=dock.json（command は $HOME リテラルのまま）
+  local n
+  mkdir -p "$1/bin"
+  for n in a b c e f; do printf '#!/bin/bash\nexit 0\n' > "$1/bin/$n.sh"; chmod +x "$1/bin/$n.sh"; done
+  cat > "$2" <<'EOF'
+{"controls":[
+  {"id":"a","title":"A","command":"$HOME/bin/a.sh"},
+  {"id":"b","title":"B","command":"K1=v1 $HOME/bin/b.sh"},
+  {"id":"c","title":"C","command":"K1=v1 K_2=v2 $HOME/bin/c.sh"},
+  {"id":"d","title":"D","command":"K1=v1 $HOME/bin/missing.sh"},
+  {"id":"e","title":"E","command":"1A=1 $HOME/bin/e.sh"},
+  {"id":"f","title":"F","command":"K1= $HOME/bin/f.sh"}
+]}
+EOF
+}
+# guard を source して関数を直接呼ぶ。$1=stub_bin $2=state_dir $3=dock.json $4=隔離HOME
+# guard_targets → 判定対象の集合（sort 済・空白区切り）／guard_alive → 0=健全 1=劣化
+guard_targets() {
+  ( export HOME="$4" PATH="$1:$PATH" CMUX_DOCK_GUARD_STATE_DIR="$2" CMUX_DOCK_GUARD_DOCK_JSON="$3"
+    . "$TARGET"
+    expected_process_patterns ) | sort | tr '\n' ' ' | sed 's/ $//'
+}
+guard_alive() {
+  ( export HOME="$4" PATH="$1:$PATH" CMUX_DOCK_GUARD_STATE_DIR="$2" CMUX_DOCK_GUARD_DOCK_JSON="$3"
+    . "$TARGET"
+    dock_processes_alive ) >/dev/null 2>&1 && echo 0 || echo 1
+}
+{
+  STUB_BIN="$WORKDIR/n/bin"; STUB_DIR="$WORKDIR/n/stub"; STATE_DIR="$WORKDIR/n/state"; DOCK_JSON="$WORKDIR/n/dock.json"
+  WG_HOME="$WORKDIR/n/home"
+  mkdir -p "$STUB_DIR" "$WG_HOME"
+  setup_stub_bin "$STUB_BIN" "$STUB_DIR"
+  make_wg1 "$WG_HOME" "$DOCK_JSON"
+
+  assert_eq "AC-155: 判定対象の集合が {a.sh, b.sh, c.sh, f.sh} と完全一致（(d) 実体なし・(e) 文法外は含まない）" \
+    "a.sh b.sh c.sh f.sh" "$(guard_targets "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" "$WG_HOME")"
+  printf 'a.sh\nb.sh\nc.sh\nf.sh\n' > "$STUB_DIR/alive_patterns"
+  assert_eq "AC-155: (a)(b)(c)(f) が全部生きていれば健全" "0" "$(guard_alive "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" "$WG_HOME")"
+  printf 'a.sh\nc.sh\nf.sh\n' > "$STUB_DIR/alive_patterns"
+  assert_eq "AC-155: (b) 前置1つの枠だけが死ぬと劣化" "1" "$(guard_alive "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" "$WG_HOME")"
+  printf 'a.sh\nb.sh\nf.sh\n' > "$STUB_DIR/alive_patterns"
+  assert_eq "AC-155: (c) 前置2つの枠だけが死ぬと劣化" "1" "$(guard_alive "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" "$WG_HOME")"
+
+  # main 経由でも同じ＝(b) だけ死んだ状態で new-window 修復が発動する（既存 (d) と同じ口）。
+  touch "$STUB_DIR/cmux_up"
+  echo "4242" > "$STUB_DIR/app_pid"
+  echo "Fri Aug  7 21:00:00 2026" > "$STUB_DIR/app_start"
+  printf 'A\nB\nC\nD\nE\nF\n' > "$STUB_DIR/observed_titles"
+  printf 'A\nB\nC\nD\nE\nF\n' > "$STUB_DIR/healthy_titles"
+  printf 'a.sh\nc.sh\nf.sh\n' > "$STUB_DIR/alive_patterns"
+  printf 'a.sh\nb.sh\nc.sh\nf.sh\n' > "$STUB_DIR/healthy_alive_patterns"
+  touch "$STUB_DIR/newwin_revives_processes"
+  printf 'WIN1\t0\n' > "$STUB_DIR/windows.tsv"
+  printf 'WS1\tWIN1\n' > "$STUB_DIR/ws_owner.tsv"
+  HOME="$WG_HOME" run_guard "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" >/dev/null
+  rc=$?
+  assert_eq "AC-155(main): exit 0で終了する" "0" "$rc"
+  assert_true "AC-155(main): (b) だけ死んだ状態で new-window 修復が発動する" \
+    "$(grep -q '^cmux new-window$' "$STUB_DIR/calls.log" && echo 1 || echo 0)"
+}
+
+echo "=== (o) v6 DT-31: 前置の文法の境界（TAB／連続空白・前置3つ・値に =・値に空白） ==="
+# 設計 §41.9.4 DT-31・§41.7.2。TAB／連続空白・前置 3 つ・K=a=b は対象に含む。
+# K="a b" <実体> は前置 K="a ＋ 実体 b"（不在）と読まれて判定外。
+{
+  STUB_BIN="$WORKDIR/o/bin"; STUB_DIR="$WORKDIR/o/stub"; STATE_DIR="$WORKDIR/o/state"; DOCK_JSON="$WORKDIR/o/dock.json"
+  DT_HOME="$WORKDIR/o/home"
+  mkdir -p "$STUB_DIR" "$DT_HOME/bin"
+  setup_stub_bin "$STUB_BIN" "$STUB_DIR"
+  for n in tab sp three eq q; do printf '#!/bin/bash\nexit 0\n' > "$DT_HOME/bin/$n.sh"; chmod +x "$DT_HOME/bin/$n.sh"; done
+  cat > "$DOCK_JSON" <<'EOF'
+{"controls":[
+  {"id":"tab","title":"Tab","command":"K1=v1\t$HOME/bin/tab.sh"},
+  {"id":"sp","title":"Sp","command":"K1=v1   $HOME/bin/sp.sh"},
+  {"id":"three","title":"Three","command":"K1=v1 K2=v2 K3=v3 $HOME/bin/three.sh"},
+  {"id":"eq","title":"Eq","command":"K=a=b $HOME/bin/eq.sh"},
+  {"id":"q","title":"Q","command":"K=\"a b\" $HOME/bin/q.sh"}
+]}
+EOF
+  assert_eq "DT-31: 判定対象の集合が {eq.sh, sp.sh, tab.sh, three.sh}（K=\"a b\" の枠は判定外）" \
+    "eq.sh sp.sh tab.sh three.sh" "$(guard_targets "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" "$DT_HOME")"
+  printf 'eq.sh\nsp.sh\ntab.sh\nthree.sh\n' > "$STUB_DIR/alive_patterns"
+  assert_eq "DT-31: 4 つが生きていれば健全（q.sh の生存は問われない）" "0" "$(guard_alive "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" "$DT_HOME")"
+  printf 'eq.sh\nsp.sh\nthree.sh\n' > "$STUB_DIR/alive_patterns"
+  assert_eq "DT-31: TAB 区切りの枠だけが死ぬと劣化" "1" "$(guard_alive "$STUB_BIN" "$STATE_DIR" "$DOCK_JSON" "$DT_HOME")"
+}
+
+echo "=== (p) v6 AC-154(c) 文書の追随（dock-guard の説明に「前置」） ==="
+# 要件 §9「文書」＝cmux/cmux-dock-guard/README.md（無ければ cmux-dock-guard.sh の冒頭コメント）。
+{
+  DOC_GUARD="$TESTS_DIR/../README.md"
+  if [ -r "$DOC_GUARD" ]; then
+    DOC_TEXT="$(cat "$DOC_GUARD")"
+  else
+    DOC_TEXT="$(awk '/^[^#]/{exit} {print}' "$TARGET")"
+  fi
+  assert_true "AC-154(c): dock-guard の説明に 前置 を含む文が1つ以上（生存判定の対象になる旨）" \
+    "$(printf '%s\n' "$DOC_TEXT" | grep -F '前置' | grep -qF '生存' && echo 1 || echo 0)"
+}
+
+echo "=== (q) 実装の内部不変条件: strip_env_prefix（前置の文法の正本・tests/test-cmux-dock-json.sh が source して使う） ==="
+# 値は使わない・eval しない・前置だけの文字列はそのまま返す・剥がした後の先頭空白類は落とす。
+strip_via_guard() {
+  ( . "$TARGET"; strip_env_prefix "$1" )
+}
+{
+  assert_eq "strip: 前置なしはそのまま" '$HOME/bin/a.sh' "$(strip_via_guard '$HOME/bin/a.sh')"
+  assert_eq "strip: 前置1つ" '$HOME/bin/b.sh' "$(strip_via_guard 'K1=v1 $HOME/bin/b.sh')"
+  assert_eq "strip: 前置2つ・空値" '$HOME/bin/f.sh' "$(strip_via_guard 'K1= K_2=v2 $HOME/bin/f.sh')"
+  assert_eq "strip: 値に = を含む前置" '$HOME/bin/eq.sh' "$(strip_via_guard 'K=a=b $HOME/bin/eq.sh')"
+  assert_eq "strip: TAB＋連続空白の区切り" '$HOME/bin/t.sh' "$(strip_via_guard "$(printf 'K1=v1\t  K2=v2\t$HOME/bin/t.sh')")"
+  assert_eq "strip: 文法外（1A=1）は剥がさない" '1A=1 $HOME/bin/e.sh' "$(strip_via_guard '1A=1 $HOME/bin/e.sh')"
+  assert_eq "strip: 文法外（K-1=1）は剥がさない" 'K-1=1 x' "$(strip_via_guard 'K-1=1 x')"
+  assert_eq "strip: 前置だけ（本体なし）はそのまま" 'K1=v1' "$(strip_via_guard 'K1=v1')"
+  assert_eq "strip: 値の途中の空白は K=\"a を前置とし b\" 以降を残す" 'b" $HOME/bin/q.sh' "$(strip_via_guard 'K="a b" $HOME/bin/q.sh')"
+  assert_eq "strip: 本体の後ろの引数は保持" '$HOME/bin/a.sh --x' "$(strip_via_guard 'K=1 $HOME/bin/a.sh --x')"
+  assert_eq "strip: 値に \$(…) や \$HOME があっても展開・実行せず文字列として読み飛ばす（eval しない）" \
+    '$HOME/bin/a.sh' "$(strip_via_guard 'K=$(hostname) H=$HOME $HOME/bin/a.sh')"
+}
+
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ]

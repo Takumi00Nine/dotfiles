@@ -108,6 +108,13 @@ assert_eq "stty桁数(50)が既定60以下ならそのまま（丸めない）" 
 _stty_cols() { printf '70'; }
 assert_eq "CMUX_DOCK_MAX_COLS=80指定時、stty桁数(70)が上限未満ならそのまま" "70" "$(CMUX_DOCK_MAX_COLS=80 term_cols "")"
 
+# v6 AC-152「幅の上限の規則」（requirements-v6.md FR-110・§11）＝端末取得 37・
+# 上限 36 → 描画幅 36。明示の上書き 37 は上限の対象外（Project 枠の pty 37 桁・
+# 可視幅 36 の実機事象 E-v6-5 と同じ値）。
+_stty_cols() { printf '37'; }
+assert_eq "v6_ac152_min_rule: 端末取得37・上限36 → 36" "36" "$(CMUX_DOCK_MAX_COLS=36 term_cols "")"
+assert_eq "v6_ac152_min_rule: 明示の上書き37は上限36の対象外 → 37" "37" "$(CMUX_DOCK_MAX_COLS=36 term_cols "37")"
+
 # unset -f だと元の定義が失われたままになる（このシェルでの再定義に上書き
 # の巻き戻し履歴が無いため）。lib を再 source して原本の _stty_cols へ戻す。
 . "$LIB"
