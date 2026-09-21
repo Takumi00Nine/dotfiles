@@ -9,7 +9,7 @@
     {
       "id": "next",
       "title": "Project",
-      "command": "$HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh"
+      "command": "CMUX_DOCK_MAX_COLS=36 $HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh"
     },
     {
       "id": "task",
