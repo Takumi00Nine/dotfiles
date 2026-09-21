@@ -826,6 +826,38 @@ mk_stub_WW_2() {  # $1=パス
   _compose_frame "Project" "$CMUX_FRAME_VERSION_PROJECT" "${l[@]}" | _write_frame_stub "$1"
 }
 
+# --- FV（v7・要件 requirements-v7.md §7・設計 §42.9.3「RP の供給側スタブ」） -----
+# 2 引数の口を持つ供給側スタブ＝`--frame` は記録フレーム（$2 のファイル）を
+# そのまま出し、`--focus` は隣接ファイル `$1.focus` の内容をそのまま出す
+# （rc 0）。例外＝`$1.focus` の 1 行目が `sleep N` なら N 秒待って何も出さない
+# （FD-9／9′＝照会のハング）。呼出しは引数別に数えられるよう `$1.calls` へ
+# 「引数<TAB>単調時計（秒）」を 1 行追記する（DT-37・DT-40・AC-168）。
+# `--frame`／`--focus` 以外の引数は使い方エラー（rc 1）。
+mk_stub_FV() {  # $1=パス $2=記録フレームのファイル（絶対パス）
+  local path="$1" frame="$2"
+  : > "${path}.focus"
+  : > "${path}.calls"
+  cat > "$path" <<STUBEOF
+#!/bin/bash
+printf '%s\t%s\n' "\${1:-}" "\$(python3 -c 'import time; print(time.monotonic())')" >> "${path}.calls"
+case "\${1:-}" in
+  --frame) cat "$frame" ;;
+  --focus)
+    IFS= read -r first < "${path}.focus" 2>/dev/null || first=""
+    case "\$first" in
+      "sleep "[0-9]*) sleep "\${first#sleep }"; exit 0 ;;
+    esac
+    cat "${path}.focus" ;;
+  *) echo "使い方: --frame|--focus" >&2; exit 1 ;;
+esac
+STUBEOF
+  chmod +x "$path"
+}
+# $1=スタブパス $2=--focus が出す 1 行（空文字＝空行・"sleep N"＝N 秒ハング）。
+set_stub_FV_focus() { printf '%s\n' "$2" > "${1}.focus"; }
+# $1=スタブパス $2=引数（--frame／--focus） → その引数での呼出し回数。
+stub_FV_calls() { awk -F '\t' -v a="$2" '$1 == a { n++ } END { print n + 0 }' "${1}.calls" 2>/dev/null; }
+
 # WU-Z＝描画側の陰性スタブ群（AC-139）。$1=パス $2=サブID(a..h)。
 # (a)〜(f)(h)＝契約違反（rc=3・応答なし）／(g)＝版ちがい（rc=2）。
 WU_Z_IDS=(a b c d e f g h)

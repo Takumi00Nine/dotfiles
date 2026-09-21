@@ -89,13 +89,16 @@ supply_deadline() {
 # 先頭で初期化）。
 #   $1 = SUPPLY（呼び出し口の絶対パス）
 #   $2 = DEADLINE（秒・正規化済み）
+#   $3 = 供給側へ渡す引数（省略時 --frame＝v7 §42.4・R-v7-3。Project 常駐は
+#        対象周期で --focus も同じ部品で呼ぶ。契約検証は fetch_frame＝--frame
+#        の経路だけ）
 # 戻り値:
 #   0  = RAW にデータがある（validate_frame へ進む）
 #   10 = 未導入（S0＝呼び出し口が [ -x ] を満たさない）
 #   1  = 応答なし（mktemp失敗・上限到達・締切・非0終了・rc=0で0バイト等。
 #        どの経路でも理由行は同じなので細分しない＝§31.1の結末表）
 run_supply() {
-  local supply="$1" deadline="$2"
+  local supply="$1" deadline="$2" arg="${3:-"--frame"}"
   RAW=""; RCF=""; DONE=""; TOUT=""; SUPPLY_PGID=""; WATCH_PGID=""
 
   [ -x "$supply" ] || return 10
@@ -115,13 +118,13 @@ run_supply() {
   # stderr*へ直接出す（disownはジョブ表から外すだけで、この行は止められ
   # ない＝検証5巡目 #46）。フォークする2文だけを{ }2>/dev/nullで包み、
   # ジョブ制御由来のこの1行だけを描画側stderrから隔離する（供給側自身の
-  # stderrは"$supply" --frame 2>/dev/nullで既に個別に捨てているので、
+  # stderrは"$supply" "$arg" 2>/dev/nullで既に個別に捨てているので、
   # ここでの追加の抑制で失われる診断は無い）。PGIDでの一括終了
   # （DT-13・DT-14・AC-95・AC-123が検査する性質）はこの変更で変わらない
   # （{ }はサブシェルを作らないため$!・SUPPLY_PGID/WATCH_PGIDの捕捉は従来
   # どおり）。
   {
-    ( { "$supply" --frame 2>/dev/null; echo $? >"$RCF"; } |
+    ( { "$supply" "$arg" 2>/dev/null; echo $? >"$RCF"; } |
         head -n 1001 |
         { dd bs=1 count=65537 of="$RAW" 2>/dev/null; : >"$DONE"; } ) &
     SUPPLY_PGID=$!

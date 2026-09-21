@@ -1046,6 +1046,53 @@ python3 "$CENSUS_PY" "$WORKDIR/s38_comment.sh" > "$WORKDIR/s38_comment.out"
 assert_eq "検証3巡目#38回帰(comment/heredoc): コメント内・ヒアドキュメント本文は誤検知しない" \
   "0" "$(awk -F '\t' '$1=="VIOLATION_COUNT"{print $2}' "$WORKDIR/s38_comment.out")"
 
+echo "=== v7: 供給側呼び出しの引数の口（設計 §42.4・§42.12 R-v7-3＝M-v7-8／M-v7-10） ==="
+# 描画側は供給側を --frame（フレーム周期）と --focus（対象周期）の 2 引数で呼ぶ。
+# run_supply は第 3 引数で供給側へ渡す引数を受け、省略時は --frame（既存の
+# 直接呼び出しは無改修で通る）。--focus のときは契約検証（validate_frame）を
+# 通さず生バイトをそのまま RAW へ置く。締切・後始末は引数に依らず不変。
+# 供給側＝FV スタブ（lib-supply-stubs.sh mk_stub_FV・呼出しを引数別に記録）。
+mk_stub_WU_F "$WORKDIR/wu_f_for_arg"
+mk_stub_FV "$WORKDIR/fv_arg" "$WORKDIR/wu_f_for_arg.data"
+set_stub_FV_focus "$WORKDIR/fv_arg" "p-act2"
+SUPPLY_PGID=""; WATCH_PGID=""; RAW=""; RCF=""; DONE=""; TOUT=""
+run_supply "$WORKDIR/fv_arg" 5
+rc=$?
+assert_eq "v7_arg_default_frame: 第 3 引数省略は rc=0" "0" "$rc"
+assert_eq "v7_arg_default_frame: 省略時は --frame で呼ぶ（--frame 1 回・--focus 0 回）" "1/0" \
+  "$(stub_FV_calls "$WORKDIR/fv_arg" --frame)/$(stub_FV_calls "$WORKDIR/fv_arg" --focus)"
+assert_true "v7_arg_default_frame: RAW は記録フレームと同じバイト列" "$(cmp -s "$RAW" "$WORKDIR/wu_f_for_arg.data" && echo 1 || echo 0)"
+supply_rm_transient
+: > "$WORKDIR/fv_arg.calls"
+SUPPLY_PGID=""; WATCH_PGID=""; RAW=""; RCF=""; DONE=""; TOUT=""
+run_supply "$WORKDIR/fv_arg" 5 --focus
+rc=$?
+assert_eq "v7_arg_focus: --focus を渡すと rc=0" "0" "$rc"
+assert_eq "v7_arg_focus: --focus で呼ぶ（--focus 1 回・--frame 0 回）" "1/0" \
+  "$(stub_FV_calls "$WORKDIR/fv_arg" --focus)/$(stub_FV_calls "$WORKDIR/fv_arg" --frame)"
+assert_eq "v7_arg_focus: RAW は照会口の 1 行そのまま（契約検証を通さない）" "p-act2" "$(cat "$RAW" 2>/dev/null)"
+supply_rm_transient
+# 締切は引数に依らず不変（P-3 と同じ線＝締切 1 秒で 4 秒以内に rc=1）。
+set_stub_FV_focus "$WORKDIR/fv_arg" "sleep 10"
+SUPPLY_PGID=""; WATCH_PGID=""; RAW=""; RCF=""; DONE=""; TOUT=""
+t0="$(now_mono)"
+run_supply "$WORKDIR/fv_arg" 1 --focus
+rc=$?
+elapsed="$(python3 -c "print($(now_mono) - $t0)")"
+assert_eq "v7_arg_focus_deadline: --focus のハングも締切で rc=1(応答なし)" "1" "$rc"
+assert_true "v7_arg_focus_deadline: 4 秒以内に落ちる" "$(python3 -c "print(1 if $elapsed <= 4.0 else 0)")"
+supply_rm_transient
+# fetch_frame（既存の主入口・引数省略）は無改修＝--frame だけで呼び契約検証を通す。
+set_stub_FV_focus "$WORKDIR/fv_arg" "p-act2"
+: > "$WORKDIR/fv_arg.calls"
+SUPPLY_PGID=""; WATCH_PGID=""; RAW=""; RCF=""; DONE=""; TOUT=""; MODEL=""
+fetch_frame Project "$WORKDIR/fv_arg"
+assert_eq "v7_arg_fetch_frame: 既存の fetch_frame は通常描画（FRAME_REASON 空）" "" "$FRAME_REASON"
+assert_eq "v7_arg_fetch_frame: --frame だけで呼ぶ（--frame 1 回・--focus 0 回）" "1/0" \
+  "$(stub_FV_calls "$WORKDIR/fv_arg" --frame)/$(stub_FV_calls "$WORKDIR/fv_arg" --focus)"
+assert_eq "v7_arg_fetch_frame: 本体行は 6 行（WU-F）" "6" "$(wc -l < "$MODEL" 2>/dev/null | tr -d ' ')"
+rm -f -- "$MODEL" 2>/dev/null; MODEL=""
+
 echo
 echo "=== 結果: PASS=$PASS FAIL=$FAIL ==="
 if [ "$FAIL" -gt 0 ]; then

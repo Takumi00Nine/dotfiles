@@ -1,0 +1,7 @@
+#V	cmux-dock-frame/4	Project
+P	1	p-act1	設計	稼働中	
+P	2	p-act2	実装	稼働中	
+P	3	roles-conf	職種を設定だけで縛る	待ち	2026-12-31T23:59
+P	4	p-hold	止	保留	
+B	外部脳	ok	OK
+E	5
