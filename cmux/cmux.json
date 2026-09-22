@@ -35,6 +35,13 @@
         "id" : "sound-only-leader-call",
         "command" : "jq 'if ((.notification.title // \"\") | startswith(\"📣\")) then . else .effects.sound = false | .effects.desktop = false | .effects.markUnread = false | .effects.paneFlash = false end'",
         "timeoutSeconds" : 5
+      },
+      // 📣 通知取次 v1（2026-09-22）: 📣 通知を CODE27 に喋らせる取次フック。入力 JSON をそのまま返す
+      // （上の無音化フックの結果を変えない）。本体＝~/work/tools/code27-call（README 参照）。
+      {
+        "id" : "code27-call",
+        "command" : "$HOME/work/tools/code27-call/bin/code27-call-hook",
+        "timeoutSeconds" : 3
       }
     ]
   },
