@@ -40,7 +40,7 @@
       // （上の無音化フックの結果を変えない）。本体＝~/work/navi-orchestrator/code27-call（README 参照）。
       {
         "id" : "code27-call",
-        "command" : "$HOME/work/navi-orchestrator/code27-call/bin/code27-call-hook",
+        "command" : "PATH=/opt/homebrew/bin:$PATH $HOME/work/navi-orchestrator/code27-call/bin/code27-call-hook",
         "timeoutSeconds" : 3
       }
     ]
