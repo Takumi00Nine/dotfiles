@@ -72,7 +72,7 @@ Dock 枠の名前は「Task」。番号は**未完の版だけ**に記載順で1
 足りず版・子行が省略されても、残った行の番号は振り直さない。
 
 「Task の N 番」の対応表を得る口は、供給側（
-`~/work/takumi009-ai-env/cmux/cmux-task-model.sh --list`）にある。
+`~/work/takumi009-ai-env/dock/executor/cmux-task-model.sh --list`）にある。
 この常駐は `--list` を提供しない（渡すと使い方を出して終了コード1・
 常駐モードへは落ちない）。
 
@@ -98,7 +98,7 @@ cmux-task-watch.sh [--once] [--plain]
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|
-| `CMUX_DOCK_SUPPLY_TASK` | `$HOME/work/takumi009-ai-env/cmux/cmux-task-model.sh` | 供給側の呼び出し口（テスト・実験用の上書き口） |
+| `CMUX_DOCK_SUPPLY_TASK` | `$HOME/work/takumi009-ai-env/dock/executor/cmux-task-model.sh` | 供給側の呼び出し口（テスト・実験用の上書き口） |
 | `CMUX_DOCK_SUPPLY_TIMEOUT` | 5 | 供給側の呼び出しの締切（秒）。1〜60の整数以外は既定へ戻す |
 | `CMUX_TASK_FOCUS_INTERVAL` | 2 | 常駐ループの周期（秒） |
 | `CMUX_TASK_REDRAW_HEARTBEAT` | 600 | 同一フレームでも強制再描画する間隔（秒） |

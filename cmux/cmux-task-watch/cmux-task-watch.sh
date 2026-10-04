@@ -41,7 +41,7 @@ fi
 . "$LIB_DIR/lib-supply-frame.sh"
 
 # --- 設定 -------------------------------------------------------------
-SUPPLY="${CMUX_DOCK_SUPPLY_TASK:-$HOME/work/takumi009-ai-env/cmux/cmux-task-model.sh}"
+SUPPLY="${CMUX_DOCK_SUPPLY_TASK:-$HOME/work/takumi009-ai-env/dock/executor/cmux-task-model.sh}"
 FOCUS_INTERVAL="$(sanitize_interval "${CMUX_TASK_FOCUS_INTERVAL:-}" 2)"
 REDRAW_HEARTBEAT="$(sanitize_interval "${CMUX_TASK_REDRAW_HEARTBEAT:-}" 600)"
 COLS_OVERRIDE="${CMUX_TASK_COLS:-}"
@@ -474,7 +474,7 @@ usage() {
 cmux は読みません＝FR-62・FR-64）。▶（今の版）・展開・番号はすべて
 供給側が決めます。呼び出し口は環境変数
 CMUX_DOCK_SUPPLY_TASK で上書きできます（既定は
-$HOME/work/takumi009-ai-env/cmux/cmux-task-model.sh）。供給側が無い・
+$HOME/work/takumi009-ai-env/dock/executor/cmux-task-model.sh）。供給側が無い・
 応答しない・契約の版が合わないときは "AI環境 未導入" のように理由行
 1行へ縮退します。
 

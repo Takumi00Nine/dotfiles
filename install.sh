@@ -9,7 +9,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # テスト専用: "1" にすると launchctl への実操作（bootout/bootstrap/enable/
 # kickstart）だけをskipする（plist生成・plutil -lintはそのまま行う）。実launchd
 # はHOMEを差し替えても隔離できないため、テストで誤って実システムのlaunchdへ
-# 登録してしまう事故を防ぐ（takumi009-ai-env scripts/install-sub.sh の
+# 登録してしまう事故を防ぐ（takumi009-ai-env core/assembly/install-sub.sh の
 # SKIP_LAUNCHCTL と同じ考え方・同じ変数名。2026-08-07にusage-refresh移設で
 # 一度削除したが、cmux-dock-guard LaunchAgentの追加で復活）。本番運用では
 # 常に既定値=0のまま。
