@@ -74,6 +74,18 @@ window_line() {
   printf '%s\n' "$RESET"
 }
 
+# プランに枠が無い（取得器が使用率とリセット時刻の両キーを明示的に null で書いた）
+# ときだけ真。空の枠やキー欠落は従来どおり「--」（usage_snapshot.py の判定と同じ）。
+window_absent() {
+  jq -e --arg w "$2" '.[$w] | type == "object" and has("used_percent")
+    and has("resets_at_epoch") and .used_percent == null
+    and .resets_at_epoch == null' "$1" >/dev/null 2>&1
+}
+
+absent_line() {
+  printf ' %s%s %s制限なし%s\n' "$LBL" "$1" "$DIM" "$RESET"
+}
+
 # サービス1つ分のブロック（ヘッダー行＋5h/7d/F5 行。F5 は show_model_weekly=1
 # の場合のみ、モデル別週次上限＝Fable の使用率＝claude 側にだけ付く）
 service_block() {
@@ -102,8 +114,8 @@ service_block() {
   d="$(read_field "$file" '.seven_day.used_percent')"
   r="$(read_field "$file" '.five_hour.resets_at_epoch')"
   rd="$(read_field "$file" '.seven_day.resets_at_epoch')"
-  window_line "5h" "$h" "$r"
-  window_line "7d" "$d" "$rd"
+  if window_absent "$file" five_hour; then absent_line "5h"; else window_line "5h" "$h" "$r"; fi
+  if window_absent "$file" seven_day; then absent_line "7d"; else window_line "7d" "$d" "$rd"; fi
   if [ "$show_model_weekly" = "1" ]; then
     # F5 (Fable の週次モデル別上限): 7d と同じリセット時刻なので、専用の
     # リセットカウントダウンは付けない（epoch に空文字を渡すと非数値
@@ -120,9 +132,9 @@ render() {
     printf '%susage ERR (jq not found)%s\n' "$ERR_C" "$RESET"
     return
   fi
-  service_block "$CACHE_DIR/claude-cache.json" "Claude" 39 1
-  printf '\n'
   service_block "$CACHE_DIR/codex-cache.json" "Codex" 213 0
+  printf '\n'
+  service_block "$CACHE_DIR/claude-cache.json" "Claude" 39 1
 }
 
 main() {
