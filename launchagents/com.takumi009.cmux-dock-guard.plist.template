@@ -6,7 +6,7 @@
      hardcoded to any one user's home directory (that broke install on
      machines with a different username, see
      com.takumi009.usage-refresh.plist.template history) or to the
-     ~/work/dotfiles convention (a clone elsewhere would otherwise point this
+     ~/Workspace/Tools/dotfiles convention (a clone elsewhere would otherwise point this
      LaunchAgent at a script that doesn't exist, failing silently under
      launchd — Opus 5 review, MINOR). -->
 <plist version="1.0">

@@ -1,16 +1,11 @@
-# claude
-cc() {
-    cd ~/Claude && claude "$@"
-}
-
 # claude-teams (cmux) — cmux resolves the claude binary itself for this
 # subcommand instead of going through cmux-claude-wrapper, so it never gets
 # the wrapper's hook injection (no turn-completion notification). Inject the
 # same hooks explicitly via --settings; see
-# ~/work/dotfiles/cmux/claude-teams-entry.sh for the full rationale/fallback
+# ~/Workspace/Tools/dotfiles/cmux/claude-teams-entry.sh for the full rationale/fallback
 # this mirrors.
 cct() {
-    local hooks="$HOME/work/dotfiles/cmux/claude-cmux-hooks.json"
+    local hooks="$HOME/Workspace/Tools/dotfiles/cmux/claude-cmux-hooks.json"
     local cmux_bin="${CMUX_BUNDLED_CLI_PATH:-cmux}"
     local settings_args=()
     local has_settings=false
@@ -32,6 +27,6 @@ cct() {
     else
         settings_args=(--settings "$hooks")
     fi
-    cd ~/Claude && CMUX_CLAUDE_HOOK_CMUX_BIN="${CMUX_CLAUDE_HOOK_CMUX_BIN:-$cmux_bin}" \
+    cd ~/Workspace && CMUX_CLAUDE_HOOK_CMUX_BIN="${CMUX_CLAUDE_HOOK_CMUX_BIN:-$cmux_bin}" \
         "$cmux_bin" claude-teams "${settings_args[@]}" "${mode_args[@]}" "$@"
 }

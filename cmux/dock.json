@@ -3,23 +3,23 @@
     {
       "id": "usage",
       "title": "Usage",
-      "command": "$HOME/work/dotfiles/cmux/cmux-usage-watch.sh",
+      "command": "$HOME/Workspace/Tools/dotfiles/cmux/cmux-usage-watch.sh",
       "height": 140
     },
     {
       "id": "next",
       "title": "Project",
-      "command": "CMUX_DOCK_MAX_COLS=36 $HOME/work/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh"
+      "command": "CMUX_DOCK_MAX_COLS=36 $HOME/Workspace/Tools/dotfiles/cmux/cmux-next-watch/cmux-next-watch.sh"
     },
     {
       "id": "task",
       "title": "Task",
-      "command": "CMUX_DOCK_MAX_COLS=35 $HOME/work/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh"
+      "command": "CMUX_DOCK_MAX_COLS=35 $HOME/Workspace/Tools/dotfiles/cmux/cmux-task-watch/cmux-task-watch.sh"
     },
     {
       "id": "system",
       "title": "System",
-      "command": "$HOME/work/dotfiles/cmux/cmux-system-watch.sh"
+      "command": "$HOME/Workspace/Tools/dotfiles/cmux/cmux-system-watch.sh"
     }
   ]
 }

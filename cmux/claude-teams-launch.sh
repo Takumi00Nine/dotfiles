@@ -9,7 +9,7 @@
 
 CMUX="$(command -v cmux || echo /Applications/cmux.app/Contents/Resources/bin/cmux)"
 WS_NAME="Supervisor"
-WS_CWD="${HOME}/Claude"
+WS_CWD="${HOME}/Workspace"
 
 open -a cmux
 

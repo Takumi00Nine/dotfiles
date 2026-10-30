@@ -7,7 +7,7 @@ cmux Dock の「Project」枠に、供給側（ai-env の `cmux-next-model.sh`�
 cmux にも一切触れない）になった。
 
 同じ `cmux/` 配下の共有 lib（`lib-dock-view.sh`・`lib-supply-frame.sh`）に
-依存する。実体のディレクトリ（`~/work/dotfiles/cmux/`）が壊れていて lib が
+依存する。実体のディレクトリ（`~/Workspace/Tools/dotfiles/cmux/`）が壊れていて lib が
 見つからないときは、理由を1行出して終了コード1で止まる（機能を欠いたまま
 無言では起動しない）。
 
@@ -101,14 +101,14 @@ cmux-next-watch.sh [--once]
 `--once` は1フレームを出して終了する（テスト・動作確認用）。それ以外の
 引数（未知の引数・`--list`）は使い方を出して終了コード非0で即座に終わる。
 `--list`（番号・正式プロジェクト名・`next` 値・区分・待ち日時の5列 TSV）は供給側
-（`~/work/takumi009-ai-env/dock/executor/cmux-next-model.sh --list`）へ移設済み
+（`~/Workspace/Tools/takumi009-ai-env/dock/executor/cmux-next-model.sh --list`）へ移設済み
 で、この常駐は提供しない。
 
 ## 環境変数
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|
-| `CMUX_DOCK_SUPPLY_PROJECT` | `$HOME/work/takumi009-ai-env/dock/executor/cmux-next-model.sh` | 供給側の呼び出し口（テスト・実験用の上書き口） |
+| `CMUX_DOCK_SUPPLY_PROJECT` | `$HOME/Workspace/Tools/takumi009-ai-env/dock/executor/cmux-next-model.sh` | 供給側の呼び出し口（テスト・実験用の上書き口） |
 | `CMUX_DOCK_SUPPLY_TIMEOUT` | 5 | 供給側の呼び出しの締切（秒）。1〜60の整数以外は既定へ戻す |
 | `CMUX_NEXT_INTERVAL` | 60 | フレーム周期（秒）＝`--frame` を取り直す間隔（前回取得からこの秒数以上経ったティックで取り直す） |
 | `CMUX_NEXT_FOCUS_INTERVAL` | 2 | 対象周期（秒）＝常駐ループの周期。毎ティック `--focus` を呼び、▶ の行を決め直す（受理規則は `CMUX_NEXT_INTERVAL` と同じ） |

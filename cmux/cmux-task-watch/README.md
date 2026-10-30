@@ -8,11 +8,11 @@ cmux Dock の4枠目「Task」に、供給側（ai-env の `cmux-task-model.sh`�
 触れない）。
 
 宣言 CLI（`set`／`unset`／`list`／`prune`）は
-`~/work/takumi009-ai-env/cmux/cmux-task-declare.sh` へ移設済み。この
+`~/Workspace/Tools/takumi009-ai-env/cmux/cmux-task-declare.sh` へ移設済み。この
 リポジトリには置かない（使い方は ai-env 側の README を参照）。
 
 同じ `cmux/` 配下の共有 lib（`lib-dock-view.sh`・`lib-supply-frame.sh`）に
-依存する。実体のディレクトリ（`~/work/dotfiles/cmux/`）が壊れていて lib が
+依存する。実体のディレクトリ（`~/Workspace/Tools/dotfiles/cmux/`）が壊れていて lib が
 見つからないときは、理由を1行出して終了コード1で止まる（機能を欠いたまま
 無言では起動しない）。
 
@@ -72,7 +72,7 @@ Dock 枠の名前は「Task」。番号は**未完の版だけ**に記載順で1
 足りず版・子行が省略されても、残った行の番号は振り直さない。
 
 「Task の N 番」の対応表を得る口は、供給側（
-`~/work/takumi009-ai-env/dock/executor/cmux-task-model.sh --list`）にある。
+`~/Workspace/Tools/takumi009-ai-env/dock/executor/cmux-task-model.sh --list`）にある。
 この常駐は `--list` を提供しない（渡すと使い方を出して終了コード1・
 常駐モードへは落ちない）。
 
@@ -98,7 +98,7 @@ cmux-task-watch.sh [--once] [--plain]
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|
-| `CMUX_DOCK_SUPPLY_TASK` | `$HOME/work/takumi009-ai-env/dock/executor/cmux-task-model.sh` | 供給側の呼び出し口（テスト・実験用の上書き口） |
+| `CMUX_DOCK_SUPPLY_TASK` | `$HOME/Workspace/Tools/takumi009-ai-env/dock/executor/cmux-task-model.sh` | 供給側の呼び出し口（テスト・実験用の上書き口） |
 | `CMUX_DOCK_SUPPLY_TIMEOUT` | 5 | 供給側の呼び出しの締切（秒）。1〜60の整数以外は既定へ戻す |
 | `CMUX_TASK_FOCUS_INTERVAL` | 2 | 常駐ループの周期（秒） |
 | `CMUX_TASK_REDRAW_HEARTBEAT` | 600 | 同一フレームでも強制再描画する間隔（秒） |

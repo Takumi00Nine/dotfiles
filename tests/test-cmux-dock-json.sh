@@ -5,14 +5,14 @@
 #
 # 実HOME・実launchd・実cmuxソケットには一切依存しない。dock.json の読み取り元は
 # 既定でREPO_ROOT（このテスト自身のcheckout）。DOTFILES_DIR 環境変数を渡すと
-# そちらへ差し替えられる（実HOME本体 $HOME/work/dotfiles を明示的に見たいとき
+# そちらへ差し替えられる（実HOME本体 $HOME/Workspace/Tools/dotfiles を明示的に見たいとき
 # 用）。$HOME 自体は展開するが、そのままだと dock.json 中の
-# "$HOME/work/dotfiles/..." が実リポジトリを指してしまうので、その接頭辞だけ
+# "$HOME/Workspace/Tools/dotfiles/..." が実リポジトリを指してしまうので、その接頭辞だけ
 # DOTFILES_DIR に読み替えてから存在確認する。
 #
 # 実行方法:
 #   bash tests/test-cmux-dock-json.sh
-#   DOTFILES_DIR=~/work/dotfiles bash tests/test-cmux-dock-json.sh
+#   DOTFILES_DIR=~/Workspace/Tools/dotfiles bash tests/test-cmux-dock-json.sh
 
 set -uo pipefail
 
@@ -32,7 +32,7 @@ if ! command -v strip_env_prefix >/dev/null 2>&1; then
   exit 1
 fi
 # 既定はREPO_ROOT（このテスト自身のcheckout）配下のdock.json/スクリプトを読む。
-# 実HOME本体（$HOME/work/dotfiles）を明示的に見たいときだけDOTFILES_DIRを渡す。
+# 実HOME本体（$HOME/Workspace/Tools/dotfiles）を明示的に見たいときだけDOTFILES_DIRを渡す。
 DOCK_JSON="$DOTFILES_DIR/cmux/dock.json"
 USAGE_SCRIPT="$DOTFILES_DIR/cmux/cmux-usage-watch.sh"
 
@@ -61,27 +61,27 @@ echo "=== 前提: DOTFILES_DIR=$DOTFILES_DIR の dock.json が読める ==="
 echo "=== (a) dock.jsonの全controlのcommand(\$HOME展開後)が実在し実行可能 ==="
 {
   assert_true "strip_env_prefix: 複数の環境変数接頭辞(A=1 B_2=x)を剥がして実行ファイルだけ残す" \
-    "$([ "$(strip_env_prefix 'A=1 B_2=x $HOME/work/dotfiles/x')" = '$HOME/work/dotfiles/x' ] && echo 1 || echo 0)"
+    "$([ "$(strip_env_prefix 'A=1 B_2=x $HOME/Workspace/Tools/dotfiles/x')" = '$HOME/Workspace/Tools/dotfiles/x' ] && echo 1 || echo 0)"
   assert_true "strip_env_prefix: 接頭辞のみ(A=1)で本体が無ければそのまま返す" \
     "$([ "$(strip_env_prefix 'A=1')" = 'A=1' ] && echo 1 || echo 0)"
   assert_true "strip_env_prefix: 先頭が数字(1A=1)は識別子でないため剥がさずそのまま返す" \
     "$([ "$(strip_env_prefix '1A=1 cmd')" = '1A=1 cmd' ] && echo 1 || echo 0)"
   assert_true "strip_env_prefix: 接頭辞の後ろが連続空白(2個)でも先頭空白を落として実行ファイルだけ残す" \
-    "$([ "$(strip_env_prefix 'A=1  $HOME/work/dotfiles/x')" = '$HOME/work/dotfiles/x' ] && echo 1 || echo 0)"
+    "$([ "$(strip_env_prefix 'A=1  $HOME/Workspace/Tools/dotfiles/x')" = '$HOME/Workspace/Tools/dotfiles/x' ] && echo 1 || echo 0)"
   assert_true "strip_env_prefix: 接頭辞と本体の間がTABでも実行ファイルだけ残す" \
-    "$([ "$(strip_env_prefix "$(printf 'A=1\t$HOME/work/dotfiles/x')")" = '$HOME/work/dotfiles/x' ] && echo 1 || echo 0)"
+    "$([ "$(strip_env_prefix "$(printf 'A=1\t$HOME/Workspace/Tools/dotfiles/x')")" = '$HOME/Workspace/Tools/dotfiles/x' ] && echo 1 || echo 0)"
 
   ids="$(jq -r '.controls[].id' "$DOCK_JSON" 2>/dev/null)"
   while IFS= read -r id; do
     [ -z "$id" ] && continue
     raw_cmd="$(jq -r --arg id "$id" '.controls[] | select(.id==$id) | .command' "$DOCK_JSON")"
     cmd="$(strip_env_prefix "$raw_cmd")"
-    # "$HOME/work/dotfiles" の接頭辞だけ DOTFILES_DIR に読み替える
+    # "$HOME/Workspace/Tools/dotfiles" の接頭辞だけ DOTFILES_DIR に読み替える
     # (worktreeで走らせたとき、実HOME配下の本体リポジトリではなくworktree自身を
     # 指すようにするため。それ以外の$HOME展開は通常のシェル展開に任せる)。
     case "$cmd" in
-      '$HOME/work/dotfiles/'*)
-        rel="${cmd#\$HOME/work/dotfiles/}"
+      '$HOME/Workspace/Tools/dotfiles/'*)
+        rel="${cmd#\$HOME/Workspace/Tools/dotfiles/}"
         resolved="$DOTFILES_DIR/$rel"
         ;;
       *)

@@ -51,7 +51,7 @@ fi
 # shellcheck source=../lib-supply-frame.sh
 . "$LIB_DIR/lib-supply-frame.sh"
 
-SUPPLY="${CMUX_DOCK_SUPPLY_PROJECT:-$HOME/work/takumi009-ai-env/dock/executor/cmux-next-model.sh}"
+SUPPLY="${CMUX_DOCK_SUPPLY_PROJECT:-$HOME/Workspace/Tools/takumi009-ai-env/dock/executor/cmux-next-model.sh}"
 INTERVAL="$(sanitize_interval "${CMUX_NEXT_INTERVAL:-}" 60)"
 REDRAW_HEARTBEAT="$(sanitize_interval "${CMUX_NEXT_REDRAW_HEARTBEAT:-}" 600)"
 ROWS_OVERRIDE="${CMUX_NEXT_ROWS:-}"
@@ -345,7 +345,7 @@ usage() {
 供給側から1フレーム分を受け取って描くだけの常駐です（Vault・外部脳ログ・
 cmux は読みません＝FR-62・FR-64）。呼び出し口は環境変数
 CMUX_DOCK_SUPPLY_PROJECT で上書きできます（既定は
-$HOME/work/takumi009-ai-env/dock/executor/cmux-next-model.sh）。供給側が無い・
+$HOME/Workspace/Tools/takumi009-ai-env/dock/executor/cmux-next-model.sh）。供給側が無い・
 応答しない・契約の版が合わないときは "AI環境 未導入" のように理由行
 1行へ縮退します。
 

@@ -72,7 +72,7 @@ run_with_timeout() {
 
 # generate_plist_from_template <repo-relative template> <destination>
 # __DOTFILES_HOME__ を実 $HOME へ、__DOTFILES_DIR__ を実際のこのリポジトリの
-# パス（$DIR。~/work/dotfiles以外にcloneした場合に備える。Opus 5レビュー
+# パス（$DIR。~/Workspace/Tools/dotfiles以外にcloneした場合に備える。Opus 5レビュー
 # 指摘・MINOR）へ置換した実ファイルを生成する（plistはXMLでシェル変数展開
 # されないため）。sedのメタ文字（& \ #）は置換元の値ごとにエスケープし、
 # 生成はmktempへ書いてからmvで原子的に行う（$HOME/$DIRに&や\が含まれる環境
@@ -143,7 +143,7 @@ install_cmux_dock_guard_launchagent() {
   install_launchagent "$dest"
 }
 
-# append_zsh_aliases_source: ~/.zshrc の末尾に cc/cct 関数(zsh/aliases.zsh)への
+# append_zsh_aliases_source: ~/.zshrc の末尾に cct 関数(zsh/aliases.zsh)への
 # source行を追記する。冪等（目印コメント`# dotfiles-managed`をgrepし、既に
 # あれば何もしない）。既存の.zshrc内容は一切変更・並べ替えせず末尾追記のみ、
 # .zshrcが無ければ新規作成する（このスクリプトは追記のみを担当。zshrc内に
@@ -151,7 +151,7 @@ install_cmux_dock_guard_launchagent() {
 append_zsh_aliases_source() {
   local zshrc="$HOME/.zshrc" marker="# dotfiles-managed"
   local src_line
-  src_line='[ -r "$HOME/work/dotfiles/zsh/aliases.zsh" ] && source "$HOME/work/dotfiles/zsh/aliases.zsh"  '"$marker"
+  src_line='[ -r "$HOME/Workspace/Tools/dotfiles/zsh/aliases.zsh" ] && source "$HOME/Workspace/Tools/dotfiles/zsh/aliases.zsh"  '"$marker"
   if [ -f "$zshrc" ] && grep -qF "$marker" "$zshrc" 2>/dev/null; then
     echo "skip: ~/.zshrcには既にdotfiles-managedのalias source行があります"
     return
@@ -174,7 +174,7 @@ link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
 # cmux 本体設定・ドック定義（2026-08-06 追加。cmux.json=通知フィルタ等 /
 # dock.json=Usage・Project・Task・System の4コントロール。Project・Task・
 # Usage の3枠は dock.json から dotfiles リポジトリ内の実体を直接指す＝v3で
-# ~/work/tools/ 経由の symlink を廃止した（cmux-session-todo設計§28.2・
+# ~/Workspace/Tools/ 経由の symlink を廃止した（cmux-session-todo設計§28.2・
 # FR-76）。Usage コントロールが読む cmux-usage-watch.sh は旧
 # claude-codex-usage リポジトリ（退役済み）から本リポジトリへ取り込み済み
 # （2026-09-18）。キャッシュ JSON の取得は takumi009-ai-env 側の

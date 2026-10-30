@@ -41,7 +41,7 @@ echo "=== (a) SKIP_LAUNCHCTL=1なら実launchdへ一切触れずplistだけ生�
   assert_true "プレースホルダ__DOTFILES_DIR__が残っていない" \
     "$(grep -q '__DOTFILES_DIR__' "$DEST" && echo 0 || echo 1)"
   # ProgramArgumentsは実際のこのリポジトリのチェックアウト先(REPO_ROOT)を
-  # 指す。__DOTFILES_HOME__/work/dotfiles決め打ちだと、~/work/dotfiles以外に
+  # 指す。__DOTFILES_HOME__/work/dotfiles決め打ちだと、~/Workspace/Tools/dotfiles以外に
   # cloneした環境で存在しないスクリプトを指してしまう（Opus 5レビュー指摘・
   # MINOR）。HOMEをFAKE_HOMEへ差し替えてもinstall.shの$DIRは実リポジトリの
   # 場所のままなので、FAKE_HOME配下ではなくREPO_ROOTを指すのが正しい。

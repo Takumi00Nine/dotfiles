@@ -56,7 +56,7 @@ echo "=== (a) 初回実行でsource行が1行入る ==="
   assert_eq "install.sh自体はexit 0で完走する" "0" "$rc"
   assert_eq "目印付きsource行が1行だけ入る" "1" "$COUNT"
   assert_true "source行がaliases.zshを指している" \
-    "$(grep -qF 'work/dotfiles/zsh/aliases.zsh' "$ZSHRC" && echo 1 || echo 0)"
+    "$(grep -qF 'Workspace/Tools/dotfiles/zsh/aliases.zsh' "$ZSHRC" && echo 1 || echo 0)"
   assert_true "追記メッセージが出る" \
     "$(echo "$out" | grep -q 'appended:.*aliases.zsh source line' && echo 1 || echo 0)"
 
@@ -126,8 +126,8 @@ EOF
 #   `${CMUX_BUNDLED_CLI_PATH:-cmux}` がPATH解決を経ずそちらを直接使って
 #   しまう（=このstubを迂回して実cmuxを起動しかねない・実測して判明した
 #   罠）。空に上書きしてPATH経由でstubを解決させる。
-# - HOMEもFAKE_HOMEへ隔離する（cctは`cd ~/Claude`するため、実`~/Claude`の
-#   有無や実`~/work/dotfiles/cmux/claude-cmux-hooks.json`の有無に結果が
+# - HOMEもFAKE_HOMEへ隔離する（cctは`cd ~/Workspace`するため、実`~/Workspace`の
+#   有無や実`~/Workspace/Tools/dotfiles/cmux/claude-cmux-hooks.json`の有無に結果が
 #   依存しないようにする。Codexレビュー2026-08-07指摘）。
 # - stdinも/dev/nullへ明示的に切る（何らかの理由で実バイナリが起動した
 #   場合に標準入力待ちでハングするのを避ける保険）。
@@ -144,7 +144,7 @@ run_cct_argv() {
 echo "=== (e) cct: --teammate-mode省略時は既定で --teammate-mode in-process が注入される ==="
 {
   FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
-  mkdir -p "$FAKE_HOME/Claude"
+  mkdir -p "$FAKE_HOME/Workspace"
   STUBDIR="$(mktemp -d)"
   cat > "$STUBDIR/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -169,7 +169,7 @@ EOF
 echo "=== (f) cct: 呼び出し側が --teammate-mode を明示したら既定注入を譲る ==="
 {
   FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
-  mkdir -p "$FAKE_HOME/Claude"
+  mkdir -p "$FAKE_HOME/Workspace"
   STUBDIR="$(mktemp -d)"
   cat > "$STUBDIR/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -192,7 +192,7 @@ EOF
 echo "=== (g) cct: -- 以降の引数は --teammate-mode に見えても明示指定と誤判定しない ==="
 {
   FAKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/test-zsh-aliases-source.XXXXXX")"
-  mkdir -p "$FAKE_HOME/Claude"
+  mkdir -p "$FAKE_HOME/Workspace"
   STUBDIR="$(mktemp -d)"
   cat > "$STUBDIR/cmux" <<'EOF'
 #!/usr/bin/env bash
