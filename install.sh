@@ -166,10 +166,7 @@ append_zsh_aliases_source() {
 
 link hammerspoon/init.lua        "$HOME/.hammerspoon/init.lua"
 link hammerspoon/nape_pro        "$HOME/.hammerspoon/nape_pro"
-link tmux/tmux.conf              "$HOME/.tmux.conf"
 link ghostty/config              "$HOME/.config/ghostty/config"
-link ghostty/start-tmux.sh           "$HOME/.config/ghostty/start-tmux.sh"
-link ghostty/cmux-session-cleanup.sh "$HOME/.config/ghostty/cmux-session-cleanup.sh"
 link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
 # cmux 本体設定・ドック定義（2026-08-06 追加。cmux.json=通知フィルタ等 /
 # dock.json=Usage・Project・Task・System の4コントロール。Project・Task・
@@ -181,7 +178,7 @@ link cmux/claude-teams-launch.sh     "$HOME/.local/bin/cmux-teams"
 # usage-fetch.sh が担う＝dotfiles 側はあくまで描画のみで symlinkしない）
 link cmux/cmux.json                  "$HOME/.config/cmux/cmux.json"
 link cmux/dock.json                  "$HOME/.config/cmux/dock.json"
-chmod +x "$DIR/ghostty/start-tmux.sh" "$DIR/ghostty/cmux-session-cleanup.sh" "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh" "$DIR/cmux/cmux-next-watch/cmux-next-watch.sh" "$DIR/cmux/cmux-dock-guard/cmux-dock-guard.sh" "$DIR/cmux/cmux-usage-watch.sh"
+chmod +x "$DIR/cmux/claude-teams-launch.sh" "$DIR/cmux/claude-teams-entry.sh" "$DIR/cmux/cmux-next-watch/cmux-next-watch.sh" "$DIR/cmux/cmux-dock-guard/cmux-dock-guard.sh" "$DIR/cmux/cmux-usage-watch.sh"
 
 append_zsh_aliases_source
 install_cmux_dock_guard_launchagent
@@ -189,7 +186,6 @@ install_cmux_dock_guard_launchagent
 cat <<'EOF'
 
 Done. Apply each config:
-  - tmux:        tmux source-file ~/.tmux.conf   (or restart tmux)
   - Hammerspoon: menubar 🔨 -> Reload Config
   - Ghostty:     Cmd+Shift+,                     (or restart Ghostty)
   - zsh:         cc/cct source line added to ~/.zshrc if missing

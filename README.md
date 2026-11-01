@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 A collection of macOS configuration files for AI work (Claude Code / Codex).
-It brings together terminal settings (Ghostty + tmux), Hammerspoon hotkeys (Keychron mouse + Nape Pro trackball) for controlling AI terminals, and a [`cmux`](https://cmux.com) integration suite (Dock status panes, Agent Teams launcher, notification filtering).
+It brings together terminal settings (Ghostty), Hammerspoon hotkeys (Keychron mouse + Nape Pro trackball) for controlling AI terminals, and a [`cmux`](https://cmux.com) integration suite (Dock status panes, Agent Teams launcher, notification filtering).
 
 Environment: macOS (Apple Silicon)
 
@@ -37,10 +37,8 @@ dotfiles/
 │   ├── layout-enforce.sh          One-shot pane-width enforcement (e.g. right after spawning a teammate)
 │   ├── lib-layout.sh              Shared pane-width logic (sourced by layout-enforce.sh / show-review.sh)
 │   └── show-review.sh             Shows a deliverable (Markdown/HTML/URL) in a review pane
-├── ghostty/                       Ghostty terminal config + tmux/cmux session glue
-│   ├── config
-│   ├── start-tmux.sh              Attach to (or create) the tmux session matching the current cmux workspace
-│   └── cmux-session-cleanup.sh    Kill orphaned tmux sessions whose cmux workspace no longer exists
+├── ghostty/                       Ghostty terminal config
+│   └── config
 ├── hammerspoon/                   Keychron mouse / Nape Pro trackball -> AI terminal control
 │   ├── init.lua                   F17/F18 hotkeys; wires nape_pro/ in
 │   ├── README.md                  Details for init.lua (mic/video toggle, Enter send)
@@ -53,8 +51,6 @@ dotfiles/
 ├── tests/                         Repo-level tests for install.sh behavior
 │   ├── test-zsh-aliases-source.sh
 │   └── test-cmux-dock-guard-launchagent.sh
-├── tmux/
-│   └── tmux.conf                  prefix=Ctrl+a, directional splits, Shift+arrow movement, etc.
 ├── zsh/
 │   └── aliases.zsh                cct function, source'd from ~/.zshrc (not symlinked; see below)
 └── install.sh                     Installer: symlink each config, or append (zsh)
@@ -72,10 +68,7 @@ Usage-tracking is split across two repos: this repo bundles the Dock-rendering s
 |---|---|---|
 | `hammerspoon/init.lua` | `~/.hammerspoon/init.lua` | symlink |
 | `hammerspoon/nape_pro/` | `~/.hammerspoon/nape_pro` | symlink (directory) |
-| `tmux/tmux.conf` | `~/.tmux.conf` | symlink |
 | `ghostty/config` | `~/.config/ghostty/config` | symlink |
-| `ghostty/start-tmux.sh` | `~/.config/ghostty/start-tmux.sh` | symlink |
-| `ghostty/cmux-session-cleanup.sh` | `~/.config/ghostty/cmux-session-cleanup.sh` | symlink |
 | `cmux/claude-teams-launch.sh` | `~/.local/bin/cmux-teams` | symlink |
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
@@ -98,7 +91,6 @@ cd ~/Workspace/Tools/dotfiles
 ```
 
 Apply changes:
-- tmux: `tmux source-file ~/.tmux.conf` (or restart)
 - Hammerspoon: menu bar hammer icon -> Reload Config
 - Ghostty: `Cmd+Shift+,` (or restart)
 - zsh: `cct` source line added to `~/.zshrc` if missing (restart the shell, or `source ~/.zshrc`)
@@ -112,13 +104,8 @@ Apply changes:
 ### hammerspoon/
 Hammerspoon configuration for controlling AI terminals with Keychron mouse buttons. F18 toggles video pause/resume + microphone (right command) + focuses the claude terminal; F17 brings the claude terminal to the front and sends Enter. See [`hammerspoon/README.md`](hammerspoon/README.md) for details. The `nape_pro/` module adds a full Nape Pro trackball keymap (01/02/M1/M2 + dial + combos); see [`hammerspoon/nape_pro/SETUP.md`](hammerspoon/nape_pro/SETUP.md).
 
-### tmux/
-- Changes prefix to `Ctrl+a` (while pressed, the session-name chip lights up red)
-- `prefix + arrow` creates directional splits, and `Shift + arrow` moves between panes
-
 ### ghostty/
 - Catppuccin Mocha theme and `macos-option-as-alt` (Option shortcuts for Claude Code)
-- Includes `start-tmux.sh`, which attaches to (or creates) a tmux session that follows the current cmux workspace name, falling back to session "ai" outside cmux — but auto-run on launch is **disabled by default** in `ghostty/config` (it conflicts with `cmux claude-teams`'s own tmux/pane management); uncomment the `command` line there to re-enable it for plain-Ghostty use
 - Ghostty does not support end-of-line comments (write comments on their own lines)
 
 ### cmux/
@@ -157,7 +144,7 @@ lua hammerspoon/tests/nape_pro_smoke_spec.lua
 # dotfiles
 
 AI 作業（Claude Code / Codex）まわりの macOS 設定ファイル集。
-ターミナル（Ghostty + tmux）、Keychron マウス／Nape Pro トラックボールから AI 端末を操作する Hammerspoon ホットキー、[`cmux`](https://cmux.com) 統合（Dockステータスペイン・Agent Teams ランチャー・通知フィルタ）をまとめている。
+ターミナル（Ghostty）、Keychron マウス／Nape Pro トラックボールから AI 端末を操作する Hammerspoon ホットキー、[`cmux`](https://cmux.com) 統合（Dockステータスペイン・Agent Teams ランチャー・通知フィルタ）をまとめている。
 
 環境: macOS (Apple Silicon)
 
@@ -187,10 +174,8 @@ dotfiles/
 │   ├── layout-enforce.sh          ペイン幅の単発矯正（チームメイト起動直後等）
 │   ├── lib-layout.sh              ペイン幅ロジック共通部（layout-enforce.sh / show-review.shからsource）
 │   └── show-review.sh             成果物（Markdown/HTML/URL）をレビュー用ペインに表示
-├── ghostty/                       Ghosttyターミナル設定＋tmux/cmuxセッション連携
-│   ├── config
-│   ├── start-tmux.sh              現在のcmuxワークスペース名に追従するtmuxセッションへattach/作成
-│   └── cmux-session-cleanup.sh    対応するcmuxワークスペースが無くなったtmuxセッションを掃除
+├── ghostty/                       Ghosttyターミナル設定
+│   └── config
 ├── hammerspoon/                   Keychronマウス／Nape Proトラックボール → AI端末制御
 │   ├── init.lua                   F17/F18ホットキー。nape_pro/を配線
 │   ├── README.md                  init.luaの詳細（マイク/動画トグル・Enter送信）
@@ -203,8 +188,6 @@ dotfiles/
 ├── tests/                         install.shの挙動に対するリポジトリレベルのテスト
 │   ├── test-zsh-aliases-source.sh
 │   └── test-cmux-dock-guard-launchagent.sh
-├── tmux/
-│   └── tmux.conf                  prefix=Ctrl+a, 方向分割, Shift+矢印移動 等
 ├── zsh/
 │   └── aliases.zsh                cct関数。~/.zshrcからsourceされる（symlinkではない。後述）
 └── install.sh                     インストーラ: 設定ごとにsymlink、またはappend（zsh）
@@ -222,10 +205,7 @@ dotfiles/
 |---|---|---|
 | `hammerspoon/init.lua` | `~/.hammerspoon/init.lua` | symlink |
 | `hammerspoon/nape_pro/` | `~/.hammerspoon/nape_pro` | symlink（ディレクトリ）|
-| `tmux/tmux.conf` | `~/.tmux.conf` | symlink |
 | `ghostty/config` | `~/.config/ghostty/config` | symlink |
-| `ghostty/start-tmux.sh` | `~/.config/ghostty/start-tmux.sh` | symlink |
-| `ghostty/cmux-session-cleanup.sh` | `~/.config/ghostty/cmux-session-cleanup.sh` | symlink |
 | `cmux/claude-teams-launch.sh` | `~/.local/bin/cmux-teams` | symlink |
 | `cmux/cmux.json` | `~/.config/cmux/cmux.json` | symlink |
 | `cmux/dock.json` | `~/.config/cmux/dock.json` | symlink |
@@ -248,7 +228,6 @@ cd ~/Workspace/Tools/dotfiles
 ```
 
 反映:
-- tmux: `tmux source-file ~/.tmux.conf`（または再起動）
 - Hammerspoon: メニューバー 🔨 → Reload Config
 - Ghostty: `Cmd+Shift+,`（または再起動）
 - zsh: `cct` のsource行が無ければ `~/.zshrc` に追記済み（シェル再起動、または `source ~/.zshrc`）
@@ -262,13 +241,8 @@ cd ~/Workspace/Tools/dotfiles
 ### hammerspoon/
 Keychron マウスのボタンで AI 端末を制御する Hammerspoon 設定。F18＝動画一時停止/再開＋マイク(右⌘)トグル＋claude端末フォーカス、F17＝claude端末を前面化して Enter 送信。詳細は [`hammerspoon/README.md`](hammerspoon/README.md)。`nape_pro/` モジュールに Nape Pro トラックボール向けの本格キーマップ(01/02/M1/M2 + ダイヤル + コンボ)を追加済み。セットアップ手順は [`hammerspoon/nape_pro/SETUP.md`](hammerspoon/nape_pro/SETUP.md)。
 
-### tmux/
-- prefix を `Ctrl+a` に変更（押下中はセッション名チップが赤く点灯）
-- `prefix + 矢印` で方向分割、`Shift + 矢印` でペイン移動
-
 ### ghostty/
 - テーマ Catppuccin Mocha、`macos-option-as-alt`（Claude Code の Option ショートカット）
-- `start-tmux.sh` を同梱（現在のcmuxワークスペース名に追従するtmuxセッションへ自動attach/作成。cmux外では"ai"にフォールバック）。ただし起動時の自動実行は `ghostty/config` で**既定では無効化**されている（`cmux claude-teams` 自身のtmux/ペイン管理と競合するため）。素のGhosttyで使う場合は同ファイルの `command` 行をコメント解除する
 - ※ Ghostty は行末コメント非対応（コメントは独立行に書く）
 
 ### cmux/

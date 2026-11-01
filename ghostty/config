@@ -1,4 +1,4 @@
-# Ghostty — minimal config for AI CLI work (Claude Code / Codex, with tmux inside).
+# Ghostty — minimal config for AI CLI work (Claude Code / Codex).
 # Edit and reload with  Cmd+Shift+,  (or restart Ghostty).
 # Preview other themes:  /Applications/Ghostty.app/Contents/MacOS/ghostty +list-themes
 # NOTE: Ghostty does not support inline (end-of-line) comments — keep comments on their own line.
@@ -19,14 +19,6 @@ window-padding-balance = true
 # ── Claude Code ──
 # Send Option as Alt/Meta so Option+Enter (newline) and Option+P (model switch) work.
 macos-option-as-alt = true
-
-# ── Startup ──
-# In cmux: attach to (or create) a tmux session named after the workspace.
-# In plain Ghostty: falls back to the shared "ai" session.
-# Script lives in dotfiles at ghostty/start-tmux.sh.
-# DISABLED 2026-07-05: tmux auto-start conflicts with `cmux claude-teams`
-# (its tmux shim must own pane management). Re-enable by uncommenting.
-# command = /Users/takumi009/.config/ghostty/start-tmux.sh
 
 # ── Quality of life ──
 copy-on-select = clipboard
